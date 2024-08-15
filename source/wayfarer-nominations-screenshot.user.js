@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Wayfarer Capture Nominations
+// @name         Wayfarer Nominations Screenshot
 // @namespace    https://github.com/wiinuk/wayfarer-user-scripts
-// @version      1.2
-// @description  Save screenshots of multiple appointments into a single image.
+// @version      1.3
+// @description  Save screenshots of multiple nominations in one image.
 // @author       Wiinuk
 // @match        https://wayfarer.nianticlabs.com/*
 // @grant        none
