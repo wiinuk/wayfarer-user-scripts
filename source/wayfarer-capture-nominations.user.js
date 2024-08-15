@@ -103,12 +103,12 @@
     /**
      * @typedef {Object} ListItemsCaptureContext
      * @property {HTMLElement | null} previousItemElement
+     * @property {HTMLElement} listElement
      */
     /**
      * @typedef {Object} ImageCaptureContext
      * @property {ListItemsCaptureContext} itemsContext
      * @property {Track} track
-     * @property {HTMLElement} listElement
      * @property {CanvasRenderingContext2D} imageContext
      * @property {number} itemCountPerImage
      * @property {number} imageCount
@@ -202,13 +202,38 @@
         });
     }
     /**
+     * @param {ListItemsCaptureContext} itemsContext
+     */
+    async function moveToNextItemElement(itemsContext) {
+        // 前の要素の次を取得
+        const itemElement =
+            itemsContext.previousItemElement?.nextElementSibling ??
+            itemsContext.listElement.querySelector("app-submissions-list-item");
+        if (!(itemElement instanceof HTMLElement)) return null;
+
+        itemsContext.previousItemElement = itemElement;
+
+        // スクロールしてアイテムを表示
+        do {
+            await waitForScrollIntoView(itemElement, { behavior: "instant" });
+        } while (
+            // スクロールしても隠れる場合があるので、完全に表示されるまで繰り返す
+            !(await isElementFullyVisible(itemElement))
+        );
+        return itemElement;
+    }
+    /**
      * @param {ImageCaptureContext} imageCaptureContext
+     * @param {HTMLElement} itemElement
      * @param {number} itemIndex
      */
-    async function captureItemToCanvas(imageCaptureContext, itemIndex) {
+    async function captureItemToCanvas(
+        imageCaptureContext,
+        itemElement,
+        itemIndex
+    ) {
         const {
             track,
-            listElement,
             imageContext,
             itemCountPerImage,
             tileCountY,
@@ -224,25 +249,6 @@
         // 白で塗りつぶす
         context.fillStyle = "white";
         context.fillRect(0, 0, canvas.width, canvas.height);
-
-        // 前の要素の次を取得
-        const itemElement =
-            imageCaptureContext.itemsContext.previousItemElement
-                ?.nextElementSibling ??
-            listElement.querySelector("app-submissions-list-item");
-        if (!(itemElement instanceof HTMLElement)) {
-            return error`item element must be an HTML element`;
-        }
-
-        imageCaptureContext.itemsContext.previousItemElement = itemElement;
-
-        // スクロールしてアイテムを表示
-        do {
-            await waitForScrollIntoView(itemElement, { behavior: "instant" });
-        } while (
-            // スクロールしても隠れる場合があるので、完全に表示されるまで繰り返す
-            !(await isElementFullyVisible(itemElement))
-        );
 
         // アイテムの画像が読み込まれるまで待機
         await waitForAllImageLoaded(itemElement);
@@ -294,14 +300,14 @@
             document.querySelector(".cdk-virtual-scroll-content-wrapper") ??
             error`list wrapper element not found`;
         /** @type {number} */
-        const itemCount = listWrapper["__ngContext__"][3][26].length;
+        const allItemCount = listWrapper["__ngContext__"][3][26].length;
 
         const result = await showConfigDialog({
             imageCount: defaultImageCount,
             imageRatioX: 4,
             imageRatioY: 3,
             rangeStartNth: 1,
-            rangeEndNth: itemCount,
+            rangeEndNth: allItemCount,
         });
         if (result === "Canceled") return;
 
@@ -313,6 +319,9 @@
             rangeStartNth,
             rangeEndNth,
         } = result;
+
+        const skipCount = rangeStartNth - 1;
+        const itemCount = rangeEndNth - rangeStartNth + 1;
 
         /** 画像1枚ごとのリストアイテム数 */
         const itemCountPerImage = Math.ceil(itemCount / imageCount);
@@ -326,9 +335,17 @@
         await waitForScrollTo(listElement, { behavior: "instant", top: 0 });
 
         let itemIndex = 0;
+        /** @type {ListItemsCaptureContext} */
         const itemsContext = {
             previousItemElement: null,
+            listElement,
         };
+        // 最初のアイテムまでスキップする
+        for (let i = 0; i < skipCount; i++) {
+            const itemElement = await moveToNextItemElement(itemsContext);
+            if (itemElement === null)
+                return error`item element must be an HTML element`;
+        }
         for (let imageIndex = 0; imageIndex < imageCount; imageIndex++) {
             const imageCanvas = document.createElement("canvas");
             imageCanvas.width = itemWidth * tileCountX;
@@ -339,7 +356,6 @@
             const captureContext = {
                 itemsContext,
                 imageContext,
-                listElement,
                 itemCount,
                 imageCount,
                 itemCountPerImage,
@@ -357,7 +373,15 @@
                 Math.min((imageIndex + 1) * itemCountPerImage, itemCount);
                 itemIndex++
             ) {
-                await captureItemToCanvas(captureContext, itemIndex);
+                const itemElement = await moveToNextItemElement(itemsContext);
+                if (itemElement === null)
+                    return error`item element must be an HTML element`;
+
+                await captureItemToCanvas(
+                    captureContext,
+                    itemElement,
+                    itemIndex
+                );
             }
 
             const imageBlob = await canvasToBlobAsync(imageCanvas, "image/png");
