@@ -1,4 +1,3 @@
-//@ts-check
 // ==UserScript==
 // @name         Wayfarer Capture Nominations
 // @namespace    https://github.com/wiinuk/wayfarer-user-scripts
@@ -8,6 +7,9 @@
 // @match        https://wayfarer.nianticlabs.com/*
 // @grant        none
 // ==/UserScript==
+
+//spell-checker: ignore wiinuk scrollend
+//@ts-check
 
 (function () {
     "use strict";
@@ -34,12 +36,6 @@
      */
     function sleep(milliseconds) {
         return new Promise((resolve) => setTimeout(resolve, milliseconds));
-    }
-    /**
-     * @returns {Promise<number>}
-     */
-    function waitForNextAnimationFrame() {
-        return new Promise(requestAnimationFrame);
     }
     /**
      *
@@ -161,20 +157,6 @@
         });
     }
     /**
-     * @param {HTMLElement} element
-     * @returns {Promise<void>}
-     */
-    function waitForTransitionEnd(element) {
-        return new Promise((resolve) => {
-            const onTransitionEnd = () => {
-                element.removeEventListener("transitionend", onTransitionEnd);
-                resolve();
-            };
-            element.addEventListener("transitionend", onTransitionEnd);
-        });
-    }
-    /**
-     *
      * @param {HTMLImageElement} imageElement
      * @returns {Promise<void>}
      */
@@ -190,26 +172,12 @@
         });
     }
     /**
-     *
-     * @param {HTMLImageElement} imageElement
-     */
-    async function waitForImageDrawingCompleted(imageElement) {
-        await waitForImageLoaded(imageElement);
-        imageElement.style.opacity = "0";
-        await waitForNextAnimationFrame();
-        imageElement.style.transition = "all 0s";
-        imageElement.style.opacity = "1";
-        await waitForTransitionEnd(imageElement);
-    }
-    /**
      * @param {Element} element
      */
-    function waitForAllImageDrawingCompleted(element) {
-        return Promise.all(
-            [...element.querySelectorAll("img")].map(
-                waitForImageDrawingCompleted
-            )
-        ).then(() => {});
+    async function waitForAllImageLoaded(element) {
+        await Promise.all(
+            [...element.querySelectorAll("img")].map(waitForImageLoaded)
+        );
     }
     /**
      * @param {Element} element
@@ -277,8 +245,7 @@
         );
 
         // アイテムの画像が読み込まれるまで待機
-        await waitForAllImageDrawingCompleted(itemElement);
-        // await waitForNextAnimationFrame();
+        await waitForAllImageLoaded(itemElement);
 
         // キャンバスに画面をキャプチャ
         const rect = itemElement.getBoundingClientRect();
