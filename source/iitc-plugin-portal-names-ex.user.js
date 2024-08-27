@@ -2,7 +2,7 @@
 // @id             iitc-plugin-portal-names-ex
 // @name           IITC plugin: Portal Names Ex
 // @category       Layer
-// @version        0.1.1
+// @version        0.1.2
 // @namespace      https://github.com/wiinuk/wayfarer-user-scripts
 // @updateURL      https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
 // @downloadURL    https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
@@ -18,6 +18,7 @@
 // @grant          none
 // ==/UserScript==
 //@ts-check
+//spell-checker: ignore moveend overlayadd overlayremove zoomend
 
 /**
  * @typedef {L.CircleMarker & {
@@ -353,11 +354,15 @@ function wrapper(plugin_info) {
         /** @type {PortalWithPoint[]} */
         const portals = [];
 
+        const mapBounds = window.map.getBounds();
         for (const [guid, p] of Object.entries(window.portals)) {
-            if (p._map && p.options.data.title) {
-                const point = window.map.project(p.getLatLng());
-                portals.push({ guid, point, portal: p });
-            }
+            if (!(p._map && p.options.data.title)) continue;
+
+            const coordinates = p.getLatLng();
+            if (!mapBounds.contains(coordinates)) continue;
+
+            const point = window.map.project(coordinates);
+            portals.push({ guid, point, portal: p });
         }
         return portals;
     }
