@@ -435,7 +435,6 @@ function wrapper(plugin_info) {
 
         // ラベルの数に上限を設け、重要度が上位のポータルのみを表示する
         notCollidedPortals = notCollidedPortals.slice(0, MAX_LABEL_COUNT);
-        console.log(notCollidedPortals.length, "件表示");
 
         /** @type {Map<string, PortalWithPoint>} */
         const labeledPortals = new Map();
