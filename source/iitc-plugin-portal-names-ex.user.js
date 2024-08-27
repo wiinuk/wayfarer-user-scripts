@@ -2,7 +2,7 @@
 // @id             iitc-plugin-portal-names-ex
 // @name           IITC plugin: Portal Names Ex
 // @category       Layer
-// @version        0.1.0
+// @version        0.1.1
 // @namespace      https://github.com/wiinuk/wayfarer-user-scripts
 // @updateURL      https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
 // @downloadURL    https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
