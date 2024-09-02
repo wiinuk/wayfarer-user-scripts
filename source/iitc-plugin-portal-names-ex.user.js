@@ -158,7 +158,8 @@ function wrapper(plugin_info) {
     const MAX_LABEL_COUNT = 100;
     /** @type {Record<string, L.ILayer>} */
     const labelLayers = {};
-    let labelLayerGroup = null;
+    /** @type {L.LayerGroup<L.ILayer>} */
+    let labelLayerGroup;
 
     function setupCSS() {
         $("<style>")
@@ -207,7 +208,7 @@ function wrapper(plugin_info) {
                 }),
             });
             labelLayers[guid] = label;
-            label.addTo(labelLayerGroup);
+            labelLayerGroup.addLayer(label);
         }
     }
 
@@ -308,7 +309,8 @@ function wrapper(plugin_info) {
             addToBucket(box);
         }
 
-        const tempNeighborBuckets = [];
+        /** @type {number[]} */
+        const tempNeighborBucketKeys = [];
 
         /**
          * @param {number} boxX
@@ -319,7 +321,7 @@ function wrapper(plugin_info) {
             const neighborBucketKeys = getNeighborBuckets(
                 boxX,
                 boxY,
-                tempNeighborBuckets
+                tempNeighborBucketKeys
             );
             for (const bucketKey of neighborBucketKeys) {
                 const bucket = buckets.get(bucketKey);
@@ -429,7 +431,123 @@ function wrapper(plugin_info) {
         const guid2 = p2.guid;
         return guid1.localeCompare(guid2);
     }
-    function updatePortalLabels() {
+
+    /**
+     * @param {Promise<void>} promise
+     * @param {() => void} [onCancel]
+     */
+    async function cancelToReject(promise, onCancel = () => {}) {
+        try {
+            return await promise;
+        } catch (e) {
+            if (e instanceof Error && e.name === "AbortError") {
+                return onCancel();
+            }
+            throw e;
+        }
+    }
+    /**
+     * @param {(promise: Promise<void>) => void} handleAsyncError
+     * @returns {(process: (signal: AbortSignal) => Promise<void>) => void}
+     */
+    function createAsyncCancelScope(handleAsyncError) {
+        let lastCancel = new AbortController();
+        return (process) => {
+            // 前の操作をキャンセル
+            lastCancel.abort();
+            lastCancel = new AbortController();
+            handleAsyncError(
+                // キャンセル例外を無視する
+                cancelToReject(process(lastCancel.signal))
+            );
+        };
+    }
+
+    class AbortError extends Error {
+        /** @override */
+        name = "AbortError";
+    }
+    function newAbortError(message = "The operation was aborted.") {
+        if (typeof DOMException === "function") {
+            return new DOMException(message, "AbortError");
+        } else {
+            return new AbortError(message);
+        }
+    }
+    /**
+     *
+     * @param {number} milliseconds
+     * @param {{ signal?: AbortSignal }} [option]
+     * @returns {Promise<void>}
+     */
+    function sleep(milliseconds, option) {
+        return new Promise((resolve, reject) => {
+            const signal = option?.signal;
+            if (signal == null) return setTimeout(resolve, milliseconds);
+            if (signal.aborted) return reject(newAbortError());
+
+            const onAbort = () => {
+                clearTimeout(id);
+                reject(newAbortError());
+            };
+            const id = setTimeout(() => {
+                signal.removeEventListener("abort", onAbort);
+                resolve();
+            }, milliseconds);
+            signal.addEventListener("abort", onAbort);
+        });
+    }
+
+    /**
+     *
+     * @param {object} [options]
+     * @param {AbortSignal} [options.signal]
+     * @returns {Promise<DOMHighResTimeStamp>}
+     */
+    function sleepUntilNextAnimationFrame(options) {
+        return new Promise((resolve, reject) => {
+            const signal = options?.signal;
+            if (signal == null) return requestAnimationFrame(resolve);
+            if (signal.aborted) return reject(newAbortError());
+            const onAbort = () => {
+                cancelAnimationFrame(id);
+                reject(newAbortError());
+            };
+            const id = requestAnimationFrame((time) => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(time);
+            });
+            signal.addEventListener("abort", onAbort);
+        });
+    }
+
+    /**
+     * @typedef YieldScheduler
+     * @property {boolean} yieldRequested
+     * @property {(options?: { signal?: AbortSignal }) => Promise<void>} yield
+     */
+
+    /** @returns {YieldScheduler} */
+    function createYieldScheduler() {
+        const yieldInterval = (1000 / 60) * 2;
+        let lastYieldEnd = -Infinity;
+        return {
+            get yieldRequested() {
+                return lastYieldEnd + yieldInterval < performance.now();
+            },
+            async yield(options) {
+                await sleepUntilNextAnimationFrame(options);
+                lastYieldEnd = performance.now();
+            },
+        };
+    }
+
+    /**
+     * @param {object} param0
+     * @param {AbortSignal} param0.signal
+     * @param {YieldScheduler} param0.scheduler
+     */
+    async function updatePortalLabels({ signal, scheduler }) {
         if (!window.map.hasLayer(labelLayerGroup)) return;
 
         const namedPortals = getNamedPortals();
@@ -454,20 +572,24 @@ function wrapper(plugin_info) {
         }
         for (const guid of labeledPortals.keys()) {
             addLabel(guid, window.portals[guid].getLatLng());
+            if (scheduler.yieldRequested) await scheduler.yield({ signal });
         }
     }
 
-    let timer;
     /**
-     * @param {number} wait
+     * @param {unknown} error
      */
-    function delayedUpdatePortalLabels(wait) {
-        if (timer === undefined) {
-            timer = setTimeout(function () {
-                timer = undefined;
-                updatePortalLabels();
-            }, wait * 1000);
-        }
+    function handleAsyncError(error) {
+        console.error(error);
+    }
+    const enterCancelScope = createAsyncCancelScope(handleAsyncError);
+
+    const scheduler = createYieldScheduler();
+    function delayedUpdatePortalLabels() {
+        enterCancelScope(async (signal) => {
+            await sleep(500, { signal });
+            await updatePortalLabels({ signal, scheduler });
+        });
     }
 
     function main() {
@@ -476,22 +598,12 @@ function wrapper(plugin_info) {
         labelLayerGroup = new L.LayerGroup();
         window.addLayerGroup("Portal Names Ex", labelLayerGroup, true);
 
-        window.addHook("requestFinished", function () {
-            setTimeout(function () {
-                delayedUpdatePortalLabels(3.0);
-            }, 1);
-        });
-        window.addHook("mapDataRefreshEnd", function () {
-            delayedUpdatePortalLabels(0.5);
-        });
-        window.map.on("moveend", () => delayedUpdatePortalLabels(0.5));
-        function onOverlayChange() {
-            setTimeout(function () {
-                delayedUpdatePortalLabels(1.0);
-            }, 1);
-        }
-        window.map.on("overlayadd", onOverlayChange);
-        window.map.on("overlayremove", onOverlayChange);
+        window.addHook("requestFinished", delayedUpdatePortalLabels);
+        window.addHook("mapDataRefreshEnd", delayedUpdatePortalLabels);
+        window.map.on("move", delayedUpdatePortalLabels);
+        window.map.on("moveend", delayedUpdatePortalLabels);
+        window.map.on("overlayadd", delayedUpdatePortalLabels);
+        window.map.on("overlayremove", delayedUpdatePortalLabels);
         window.map.on("zoomend", clearAllPortalLabels);
     }
 
