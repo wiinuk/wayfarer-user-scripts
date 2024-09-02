@@ -2,10 +2,10 @@
 // @id             iitc-plugin-portal-names-ex
 // @name           IITC plugin: Portal Names Ex
 // @category       Layer
-// @version        0.1.2
+// @version        0.1.3
 // @namespace      https://github.com/wiinuk/wayfarer-user-scripts
-// @updateURL      https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
-// @downloadURL    https://github.com/wiinuk/wayfarer-user-scripts/raw/master/source/iitc-plugin-portal-names-ex.js
+// @updateURL      https://github.com/wiinuk/wayfarer-user-scripts/raw/main/source/iitc-plugin-portal-names-ex.user.js
+// @downloadURL    https://github.com/wiinuk/wayfarer-user-scripts/raw/main/source/iitc-plugin-portal-names-ex.user.js
 // @description    Show portal names on the map.
 // @include        https://*.ingress.com/intel*
 // @include        http://*.ingress.com/intel*
