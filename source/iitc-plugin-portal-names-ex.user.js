@@ -577,10 +577,10 @@ function wrapper(plugin_info) {
     }
 
     /**
-     * @param {unknown} error
+     * @param {Promise<void>} promise
      */
-    function handleAsyncError(error) {
-        console.error(error);
+    function handleAsyncError(promise) {
+        promise.catch((error) =>         console.error(error));
     }
     const enterCancelScope = createAsyncCancelScope(handleAsyncError);
 
