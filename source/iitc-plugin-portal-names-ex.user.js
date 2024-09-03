@@ -26,109 +26,109 @@
 function wrapper(plugin_info) {
     "use strict";
 
-/**
- * @typedef {L.CircleMarker & {
- *   _map?: unknown;
- *   options: IITCPortalOptions;
- *   getLatLng(): L.LatLng;
- *   }
- * } IITCPortalInfo
- */
+    /**
+     * @typedef {L.CircleMarker & {
+     *   _map?: unknown;
+     *   options: IITCPortalOptions;
+     *   getLatLng(): L.LatLng;
+     *   }
+     * } IITCPortalInfo
+     */
 
-/**
- * @typedef {L.PathOptions & { data: IITCPortalData }} IITCPortalOptions
- */
+    /**
+     * @typedef {L.PathOptions & { data: IITCPortalData }} IITCPortalOptions
+     */
 
-/**
- * @typedef IITCPortalData
- * @property {unknown} [artifactBrief] example: `null`
- * @property {number} [health] example: 0…100。プロパティーが無い場合もある。
- * @property {string} [image] example: `"http://lh3.googleusercontent.com/…"`
- * @property {number} [latE6] example: `35689885`
- * @property {number} [level] 1…8 example: `1`
- * @property {number} [lngE6] example: `139765518`
- * @property {boolean} [mission] example: `true`
- * @property {boolean} [mission50plus] example: `true`
- * @property {string[]} [ornaments] example: `["sc5_p"]` `["bb_s"]`
- * @property {number} [resCount] 0…8 example: `1`
- * @property {"E" | "R" | "N"} [team]
- * @property {number} [timestamp] Date.now の戻り値
- * @property {string} [title] ポータルのタイトル
- */
+    /**
+     * @typedef IITCPortalData
+     * @property {unknown} [artifactBrief] example: `null`
+     * @property {number} [health] example: 0…100。プロパティーが無い場合もある。
+     * @property {string} [image] example: `"http://lh3.googleusercontent.com/…"`
+     * @property {number} [latE6] example: `35689885`
+     * @property {number} [level] 1…8 example: `1`
+     * @property {number} [lngE6] example: `139765518`
+     * @property {boolean} [mission] example: `true`
+     * @property {boolean} [mission50plus] example: `true`
+     * @property {string[]} [ornaments] example: `["sc5_p"]` `["bb_s"]`
+     * @property {number} [resCount] 0…8 example: `1`
+     * @property {"E" | "R" | "N"} [team]
+     * @property {number} [timestamp] Date.now の戻り値
+     * @property {string} [title] ポータルのタイトル
+     */
 
-/**
- * @typedef {() => void} IITCPlugin
- */
+    /**
+     * @typedef {() => void} IITCPlugin
+     */
 
-/**
- * @typedef {<Layer extends L.ILayer>(
- * name: string,
- * layerGroup: L.LayerGroup<Layer>,
- * defaultDisplay?: boolean
- * ) => unknown
- * } IITCAddLayerGroup
- */
+    /**
+     * @typedef {<Layer extends L.ILayer>(
+     * name: string,
+     * layerGroup: L.LayerGroup<Layer>,
+     * defaultDisplay?: boolean
+     * ) => unknown
+     * } IITCAddLayerGroup
+     */
 
-/**
- * @typedef IITCSearchResult
- * @property {string} [description]
- * @property {string} [icon]
- * @property {string} [title]
- * @property {L.ILayer} [layer]
- * @property {L.LatLngBounds} [bounds]
- */
+    /**
+     * @typedef IITCSearchResult
+     * @property {string} [description]
+     * @property {string} [icon]
+     * @property {string} [title]
+     * @property {L.ILayer} [layer]
+     * @property {L.LatLngBounds} [bounds]
+     */
 
-/**
- * @typedef IITCSearchQuery
- * @property {string} term
- * @property {function(IITCSearchResult): unknown} addResult
- */
+    /**
+     * @typedef IITCSearchQuery
+     * @property {string} term
+     * @property {function(IITCSearchResult): unknown} addResult
+     */
 
-/**
- * @typedef IITCHookEventNameDataMap
- * @property {unknown} portalSelected
- * @property {unknown} portalDetailsUpdated
- * @property {unknown} artifactsUpdated
- * @property {unknown} mapDataRefreshStart
- * @property {unknown} mapDataEntityInject
- * @property {unknown} mapDataRefreshEnd
- * @property {unknown} portalAdded
- * @property {unknown} linkAdded
- * @property {unknown} fieldAdded
- * @property {unknown} portalRemoved
- * @property {unknown} linkRemoved
- * @property {unknown} fieldRemoved
- * @property {unknown} publicChatDataAvailable
- * @property {unknown} factionChatDataAvailable
- * @property {unknown} requestFinished
- * @property {unknown} nicknameClicked
- * @property {unknown} geoSearch
- * @property {unknown} search
- * @property {IITCSearchQuery} search
- * @property {unknown} iitcLoaded
- * @property {unknown} portalDetailLoaded
- * @property {unknown} paneChanged
- */
+    /**
+     * @typedef IITCHookEventNameDataMap
+     * @property {unknown} portalSelected
+     * @property {unknown} portalDetailsUpdated
+     * @property {unknown} artifactsUpdated
+     * @property {unknown} mapDataRefreshStart
+     * @property {unknown} mapDataEntityInject
+     * @property {unknown} mapDataRefreshEnd
+     * @property {unknown} portalAdded
+     * @property {unknown} linkAdded
+     * @property {unknown} fieldAdded
+     * @property {unknown} portalRemoved
+     * @property {unknown} linkRemoved
+     * @property {unknown} fieldRemoved
+     * @property {unknown} publicChatDataAvailable
+     * @property {unknown} factionChatDataAvailable
+     * @property {unknown} requestFinished
+     * @property {unknown} nicknameClicked
+     * @property {unknown} geoSearch
+     * @property {unknown} search
+     * @property {IITCSearchQuery} search
+     * @property {unknown} iitcLoaded
+     * @property {unknown} portalDetailLoaded
+     * @property {unknown} paneChanged
+     */
 
-/**
- * @typedef {{
- * <K extends keyof IITCHookEventNameDataMap>(event: K, callback: (data: IITCHookEventNameDataMap[K]) => false | void): void;
- * (event: string, callback: (data: unknown) => false | void): void; }
- * } IITCAddHook
- */
+    /**
+     * @typedef {{
+     * <K extends keyof IITCHookEventNameDataMap>(event: K, callback: (data: IITCHookEventNameDataMap[K]) => false | void): void;
+     * (event: string, callback: (data: unknown) => false | void): void; }
+     * } IITCAddHook
+     */
 
-/** @typedef {unknown} IITCSetupHook */
+    /** @typedef {unknown} IITCSetupHook */
 
-/**
- * @typedef IITCGlobalExtensions
- * @property {Record<string, IITCPortalInfo>} portals
- * @property {L.Map} map
- * @property {IITCAddLayerGroup} addLayerGroup
- * @property {IITCAddHook} addHook
- * @property {IITCPlugin} plugin
- * @property {IITCSetupHook[]} bootPlugins
- * @property {boolean} iitcLoaded
- */
+    /**
+     * @typedef IITCGlobalExtensions
+     * @property {Record<string, IITCPortalInfo>} portals
+     * @property {L.Map} map
+     * @property {IITCAddLayerGroup} addLayerGroup
+     * @property {IITCAddHook} addHook
+     * @property {IITCPlugin} plugin
+     * @property {IITCSetupHook[]} bootPlugins
+     * @property {boolean} iitcLoaded
+     */
 
     const window = /** @type {Window & IITCGlobalExtensions} */ (
         /** @type {unknown} */ (globalThis.window)
@@ -565,7 +565,7 @@ function wrapper(plugin_info) {
      * @param {Promise<void>} promise
      */
     function handleAsyncError(promise) {
-        promise.catch((error) =>         console.error(error));
+        promise.catch((error) => console.error(error));
     }
     const enterCancelScope = createAsyncCancelScope(handleAsyncError);
 
@@ -602,20 +602,20 @@ function wrapper(plugin_info) {
 }
 
 (() => {
-const script = document.createElement("script");
-const info = {};
-if (typeof GM_info !== "undefined" && GM_info && GM_info.script)
-    info.script = {
-        version: GM_info.script.version,
-        name: GM_info.script.name,
-        description: GM_info.script.description,
-    };
-script.appendChild(
-    document.createTextNode(
-"(" + wrapper + ")(" + JSON.stringify(info) + ");"
-)
-);
-(document.body || document.head || document.documentElement).appendChild(
-    script
-);
+    const script = document.createElement("script");
+    const info = {};
+    if (typeof GM_info !== "undefined" && GM_info && GM_info.script)
+        info.script = {
+            version: GM_info.script.version,
+            name: GM_info.script.name,
+            description: GM_info.script.description,
+        };
+    script.appendChild(
+        document.createTextNode(
+            "(" + wrapper + ")(" + JSON.stringify(info) + ");"
+        )
+    );
+    (document.body || document.head || document.documentElement).appendChild(
+        script
+    );
 })();
