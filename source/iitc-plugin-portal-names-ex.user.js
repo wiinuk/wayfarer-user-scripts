@@ -70,6 +70,12 @@ function wrapper(plugin_info) {
      */
 
     /**
+     * @callback IITCRenderPortalDetails
+     * @param {string} guid
+     * @returns {void}
+     */
+
+    /**
      * @typedef IITCSearchResult
      * @property {string} [description]
      * @property {string} [icon]
@@ -128,6 +134,7 @@ function wrapper(plugin_info) {
      * @property {IITCPlugin} plugin
      * @property {IITCSetupHook[]} bootPlugins
      * @property {boolean} iitcLoaded
+     * @property {IITCRenderPortalDetails} renderPortalDetails
      */
 
     const window = /** @type {Window & IITCGlobalExtensions} */ (
@@ -157,7 +164,6 @@ function wrapper(plugin_info) {
                     "text-align:center;padding: 2px;" +
                     "overflow:hidden;" +
                     "text-shadow:1px 1px #000,1px -1px #000,-1px 1px #000,-1px -1px #000, 0 0 5px #000;" +
-                    "pointer-events:none;" +
                     "}"
             )
             .appendTo("head");
@@ -191,6 +197,9 @@ function wrapper(plugin_info) {
                     iconSize: [NAME_WIDTH, NAME_HEIGHT],
                     html: portalName,
                 }),
+            });
+            label.on("click", () => {
+                window.renderPortalDetails(guid);
             });
             labelLayers[guid] = label;
             labelLayerGroup.addLayer(label);
