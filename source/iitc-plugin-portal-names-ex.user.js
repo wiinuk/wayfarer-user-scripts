@@ -21,6 +21,12 @@
 //spell-checker: ignore moveend overlayadd overlayremove zoomend
 
 /**
+ * @param {{ buildName?: string, dateTimeVersion?: string, pluginId?: string, script?: { version?: string, name?: string, description?: string | null } }} plugin_info
+ */
+function wrapper(plugin_info) {
+    "use strict";
+
+/**
  * @typedef {L.CircleMarker & {
  *   _map?: unknown;
  *   options: IITCPortalOptions;
@@ -123,27 +129,6 @@
  * @property {IITCSetupHook[]} bootPlugins
  * @property {boolean} iitcLoaded
  */
-
-/**
- * @typedef IITCPluginInfo
- * @property {string} [buildName]
- * @property {string} [dateTimeVersion]
- * @property {string} [pluginId]
- * @property {IITCScriptInfo} [script]
- */
-
-/**
- * @typedef IITCScriptInfo
- * @property {string} [version]
- * @property {string} [name]
- * @property {string | null} [description]
- */
-
-/**
- * @param {IITCPluginInfo} plugin_info
- */
-function wrapper(plugin_info) {
-    "use strict";
 
     const window = /** @type {Window & IITCGlobalExtensions} */ (
         /** @type {unknown} */ (globalThis.window)
