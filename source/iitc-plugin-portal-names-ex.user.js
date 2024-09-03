@@ -616,6 +616,7 @@ function wrapper(plugin_info) {
     if (window.iitcLoaded && typeof setup === "function") setup();
 }
 
+(() => {
 const script = document.createElement("script");
 const info = {};
 if (typeof GM_info !== "undefined" && GM_info && GM_info.script)
@@ -625,8 +626,11 @@ if (typeof GM_info !== "undefined" && GM_info && GM_info.script)
         description: GM_info.script.description,
     };
 script.appendChild(
-    document.createTextNode("(" + wrapper + ")(" + JSON.stringify(info) + ");")
+    document.createTextNode(
+"(" + wrapper + ")(" + JSON.stringify(info) + ");"
+)
 );
 (document.body || document.head || document.documentElement).appendChild(
     script
 );
+})();
