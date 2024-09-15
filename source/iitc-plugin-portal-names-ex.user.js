@@ -2,7 +2,7 @@
 // @id             iitc-plugin-portal-names-ex
 // @name           IITC plugin: Portal Names Ex
 // @category       Layer
-// @version        0.1.6
+// @version        0.1.7
 // @namespace      https://github.com/wiinuk/wayfarer-user-scripts
 // @updateURL      https://github.com/wiinuk/wayfarer-user-scripts/raw/main/source/iitc-plugin-portal-names-ex.user.js
 // @downloadURL    https://github.com/wiinuk/wayfarer-user-scripts/raw/main/source/iitc-plugin-portal-names-ex.user.js
@@ -18,7 +18,7 @@
 // @grant          none
 // ==/UserScript==
 //@ts-check
-//spell-checker: ignore moveend overlayadd overlayremove zoomend
+//spell-checker: ignore moveend overlayadd overlayremove zoomend layeradd
 
 /**
  * @param {{ buildName?: string, dateTimeVersion?: string, pluginId?: string, script?: { version?: string, name?: string, description?: string | null } }} plugin_info
@@ -571,26 +571,53 @@ function wrapper(plugin_info) {
     }
 
     /**
+     * @param {L.Map} map
+     * @returns {Promise<void>}
+     */
+    function waitUntilAnyLayerAdded(map) {
+        return new Promise((resolve) => {
+            const onLayerAdd = (/** @type {L.LeafletLayerEvent} */ e) => {
+                map.off("layeradd", onLayerAdd);
+                resolve();
+            };
+            map.on("layeradd", onLayerAdd);
+        });
+    }
+    /**
+     * @param {L.Map} map
+     * @param {L.ILayer} layer
+     */
+    async function waitUntilLayerAdded(map, layer) {
+        for (;;) {
+            if (map.hasLayer(layer)) return;
+            await waitUntilAnyLayerAdded(map);
+            if (map.hasLayer(layer)) return;
+            await sleep(1000);
+        }
+    }
+    /**
      * @param {Promise<void>} promise
      */
     function handleAsyncError(promise) {
         promise.catch((error) => console.error(error));
     }
-    const enterCancelScope = createAsyncCancelScope(handleAsyncError);
 
-    const scheduler = createYieldScheduler();
-    function delayedUpdatePortalLabels() {
-        enterCancelScope(async (signal) => {
-            await sleep(500, { signal });
-            await updatePortalLabels({ signal, scheduler });
-        });
-    }
-
-    function main() {
-        setupCSS();
-
+    async function asyncMain() {
         labelLayerGroup = new L.LayerGroup();
         window.addLayerGroup("Portal Names Ex", labelLayerGroup, true);
+        await waitUntilLayerAdded(window.map, labelLayerGroup);
+
+        setupCSS();
+
+        const enterCancelScope = createAsyncCancelScope(handleAsyncError);
+
+        const scheduler = createYieldScheduler();
+        function delayedUpdatePortalLabels() {
+            enterCancelScope(async (signal) => {
+                await sleep(500, { signal });
+                await updatePortalLabels({ signal, scheduler });
+            });
+        }
 
         window.addHook("requestFinished", delayedUpdatePortalLabels);
         window.addHook("mapDataRefreshEnd", delayedUpdatePortalLabels);
@@ -602,7 +629,7 @@ function wrapper(plugin_info) {
     }
 
     const setup = function () {
-        main();
+        handleAsyncError(asyncMain());
     };
     setup.info = plugin_info;
     if (!window.bootPlugins) window.bootPlugins = [];
