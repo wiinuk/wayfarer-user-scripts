@@ -16,10 +16,21 @@
     "use strict";
 
     const classNames = {
+        title: "title",
+        "file-image": "file-image",
         "exif-text": "exif-text",
         "modify-container": "modify-container",
     };
     const css = `
+    .${classNames["title"]} {
+        background: #065d498a;
+        padding: 0.3em;
+        color: #f0ffee;
+        text-align: center;
+    }
+    .${classNames["file-image"]} {
+        width: 120px;
+    }
     .${classNames["exif-text"]} {
         width: 100%;
         overflow: auto;
@@ -29,13 +40,25 @@
         position: fixed;
         left: 0;
         top: 0;
-        z-index: 9999;
+        box-sizing: border-box;
         display: flex;
         flex-direction: column;
+        z-index: 9999;
         width: 50%;
-        height: 30%;
+        max-width: 100%;
+        max-height: 100%;
 
-        background: white;
+        resize: both;
+        overflow: auto;
+
+        color: #333;
+        background: #FFFFFF88;
+        backdrop-filter: blur(4px);
+        box-shadow: 0px 0px 9px 5px #00000085;
+    }
+    .${classNames["modify-container"]} button {
+        border-radius: 1em;
+        border: solid 1px gray;
     }
     `;
 
@@ -100,6 +123,89 @@
                   fileName.slice(dotIndex),
               ]);
     }
+
+    /**
+     * @param {HTMLElement} element
+     * @param {{ handleElement?: HTMLElement, propertyNames?: { left: string, top: string } }} [options]
+     */
+    function makeDraggable(element, options) {
+        const handleElement = options?.handleElement ?? element;
+        let offsetX = 0,
+            offsetY = 0;
+
+        /**
+         * @param {number} left
+         * @param {number} top
+         */
+        function setPosition(left, top) {
+            if (options?.propertyNames) {
+                const { left: leftName, top: topName } = options.propertyNames;
+                element.style.setProperty(leftName, `${left}px`);
+                element.style.setProperty(topName, `${top}px`);
+            } else {
+                element.style.left = `${left}px`;
+                element.style.top = `${top}px`;
+            }
+        }
+
+        /** @type {((e: PointerEvent) => void) | null } */
+        let onPointerMove = null;
+        handleElement.addEventListener("pointerdown", (e) => {
+            onPointerMove = (e) => {
+                // 画面範囲外に持って行かれないようにする
+                if (
+                    e.clientX < 0 ||
+                    e.clientY < 0 ||
+                    window.innerWidth < e.clientX ||
+                    window.innerHeight < e.clientY
+                ) {
+                    return;
+                }
+                setPosition(e.clientX - offsetX, e.clientY - offsetY);
+            };
+            handleElement.addEventListener("pointermove", onPointerMove);
+            handleElement.setPointerCapture(e.pointerId);
+            offsetX = e.clientX - element.offsetLeft;
+            offsetY = e.clientY - element.offsetTop;
+        });
+        handleElement.addEventListener("pointerup", (e) => {
+            if (!onPointerMove) return;
+
+            handleElement.removeEventListener("pointermove", onPointerMove);
+            handleElement.releasePointerCapture(e.pointerId);
+            onPointerMove = null;
+        });
+
+        // ウインドウや要素のサイズ変更で隠れたら見える位置に移動する
+        window.addEventListener("resize", tweakBounds);
+        element.addEventListener("resize", tweakBounds);
+        function tweakBounds() {
+            const rect = element.getBoundingClientRect();
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
+
+            let newX = offsetX;
+            let newY = offsetY;
+            if (rect.left < 0) {
+                newX = 0;
+            } else if (rect.right > windowWidth) {
+                newX = windowWidth - rect.width;
+            }
+
+            if (rect.top < 0) {
+                newY = 0;
+            } else if (rect.bottom > windowHeight) {
+                newY = windowHeight - rect.height;
+            }
+
+            if (newX !== offsetX || newY !== offsetY) {
+                offsetX = newX;
+                offsetY = newY;
+                setPosition(offsetX, offsetY);
+            }
+        }
+    }
+
     function handleAsyncError(e) {
         console.error(e);
     }
@@ -173,9 +279,16 @@
             return { lat: parseFloat(lat), lng: parseFloat(lng) };
         }
 
+        const titleBar = document.createElement("div");
+        titleBar.className = classNames.title;
+        titleBar.textContent = "modify exif";
+
         const fileInput = document.createElement("input");
         fileInput.type = "file";
         fileInput.name = "file";
+
+        const fileImage = document.createElement("img");
+        fileImage.className = classNames["file-image"];
 
         const latLngInputPattern =
             /(?<lat>[-+]?\d+(\.\d+)?).*?(?<lng>[-+]?\d+(\.\d+)?)/;
@@ -185,21 +298,29 @@
         const exifText = document.createElement("div");
         exifText.className = classNames["exif-text"];
 
+        const setLatLngButton = document.createElement("button");
+        setLatLngButton.textContent = "📍位置情報を設定";
+
         const moveToLatLngButton = document.createElement("button");
-        moveToLatLngButton.textContent = "Move to location";
+        moveToLatLngButton.textContent = "🎯地図で表示";
 
         const saveButton = document.createElement("button");
-        saveButton.textContent = "Save";
+        saveButton.textContent = "📥ファイルに保存";
+
+        const buttonContainer = document.createElement("div");
+        buttonContainer.append(setLatLngButton, moveToLatLngButton, saveButton);
 
         const modifyContainer = document.createElement("div");
         modifyContainer.className = classNames["modify-container"];
         modifyContainer.append(
+            titleBar,
             fileInput,
+            fileImage,
             latLngInput,
             exifText,
-            moveToLatLngButton,
-            saveButton
+            buttonContainer
         );
+        makeDraggable(modifyContainer, { handleElement: titleBar });
 
         const pinLayer = L.marker(window.map.getCenter(), {
             draggable: true,
@@ -239,11 +360,10 @@
             }
 
             const dataUrl = await readFileAs("data-url", file0);
-            const exif = piexifJs.load(dataUrl);
-
+            state.exif = piexifJs.load(dataUrl);
             state.imageFile = file0;
-            state.exif = exif;
 
+            fileImage.src = dataUrl;
             onStateUpdated();
         }
         function onChangeLatLng() {
@@ -287,6 +407,11 @@
         document.head.append(style);
 
         pinLayer.addEventListener("move", onPinChanged);
+        setLatLngButton.addEventListener("click", () => {
+            const center = window.map.getCenter();
+            setLatLng(state.exif, center.lat, center.lng);
+            onStateUpdated();
+        });
         moveToLatLngButton.addEventListener("click", onMoveToLatLngClicked);
         fileInput.addEventListener("change", () =>
             onChangeFileAsync().catch(handleAsyncError)
