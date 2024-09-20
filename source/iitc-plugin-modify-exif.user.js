@@ -15,14 +15,16 @@
 (function () {
     "use strict";
 
+    const pluginName = "iitc-plugin-modify-exif";
     const classNames = {
-        title: "title",
-        "file-image": "file-image",
-        "exif-text": "exif-text",
-        "modify-container": "modify-container",
+        title: pluginName + "-title",
+        "file-image": pluginName + "-file-image",
+        "exif-text": pluginName + "-exif-text",
+        "modify-container": pluginName + "-modify-container",
     };
     const css = `
     .${classNames["title"]} {
+        user-select: none;
         background: #065d498a;
         padding: 0.3em;
         color: #f0ffee;
@@ -279,6 +281,24 @@
             return { lat: parseFloat(lat), lng: parseFloat(lng) };
         }
 
+        const defaultOutputNameFormat = "${name}_modified";
+        /**
+         * @param {string} format
+         * @param {string} fileName
+         */
+        function applyFormat(format, fileName) {
+            return format.replace(
+                /\$\{([^}]*)}/,
+                (_, /** @type {String} */ expression) => {
+                    const variableName = expression.trim();
+                    if (variableName === "name") {
+                        return fileName;
+                    }
+                    return error`unexpected variable: ${variableName}`;
+                }
+            );
+        }
+
         const titleBar = document.createElement("div");
         titleBar.className = classNames.title;
         titleBar.textContent = "modify exif";
@@ -297,6 +317,11 @@
 
         const exifText = document.createElement("div");
         exifText.className = classNames["exif-text"];
+
+        const outputNameFormatInput = document.createElement("input");
+
+        const details = document.createElement("details");
+        details.append(outputNameFormatInput, exifText);
 
         const setLatLngButton = document.createElement("button");
         setLatLngButton.textContent = "📍位置情報を設定";
@@ -317,7 +342,7 @@
             fileInput,
             fileImage,
             latLngInput,
-            exifText,
+            details,
             buttonContainer
         );
         makeDraggable(modifyContainer, { handleElement: titleBar });
@@ -327,10 +352,11 @@
             title: "exif",
         });
 
-        /** @type {{ imageFile: File | null, exif: import("piexif-ts").IExif }}*/
+        /** @type {{ imageFile: File | null, exif: import("piexif-ts").IExif, outputNameFormat: string }}*/
         const state = {
             imageFile: null,
             exif: {},
+            outputNameFormat: defaultOutputNameFormat,
         };
         function onStateUpdated() {
             console.debug("state updated");
@@ -351,6 +377,9 @@
                 }
             } else {
                 window.map.removeLayer(pinLayer);
+            }
+            if (state.outputNameFormat !== outputNameFormatInput.value) {
+                outputNameFormatInput.value = state.outputNameFormat;
             }
         }
         async function onChangeFileAsync() {
@@ -398,7 +427,11 @@
             const link = document.createElement("a");
             link.href = newImageData;
             const [name, ext] = splitExtension(fileName);
-            link.download = `${name}_modified${ext}`;
+            const formattedName = applyFormat(
+                state.outputNameFormat ?? defaultOutputNameFormat,
+                name
+            );
+            link.download = `${formattedName}${ext}`;
             link.click();
         }
 
@@ -412,6 +445,10 @@
             setLatLng(state.exif, center.lat, center.lng);
             onStateUpdated();
         });
+        outputNameFormatInput.addEventListener("change", () => {
+            state.outputNameFormat = outputNameFormatInput.value;
+            onStateUpdated();
+        });
         moveToLatLngButton.addEventListener("click", onMoveToLatLngClicked);
         fileInput.addEventListener("change", () =>
             onChangeFileAsync().catch(handleAsyncError)
@@ -421,6 +458,7 @@
             onSaveButtonClickAsync().catch(handleAsyncError)
         );
         document.body.append(modifyContainer);
+        onStateUpdated();
     }
 
     unsafeWindow["_modify_exif_ee88b106-f009-4d4a-ba54-8d9c5090fbe3"] = {
