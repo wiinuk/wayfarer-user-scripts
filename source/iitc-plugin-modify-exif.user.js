@@ -231,8 +231,22 @@
         ).default;
         const {
             GPSHelper,
-            TagValues: { GPSIFD },
+            TagValues: { ExifIFD, GPSIFD },
         } = piexifJs;
+
+        /**
+         * 実行時にフィールドに記録された型が仕様と合っていないと insert メソッドが例外を吐くため修正する
+         * @param {import("piexif-ts").IExif} param0
+         */
+        function fixExif({ Exif }) {
+            if (Exif) {
+                // type: byte, value: 1 で保存されている場合
+                // type: undefined, value: 1 に修正する
+                if (Exif[ExifIFD.SceneType] === 1) {
+                    Exif[ExifIFD.SceneType] = "\u0001";
+                }
+            }
+        }
 
         /**
          * @param {import("piexif-ts").IExif} param0
@@ -420,6 +434,8 @@
 
             const fileName = state.imageFile.name;
             const imageData = await readFileAs("data-url", state.imageFile);
+
+            fixExif(state.exif);
             const newImageData = piexifJs.insert(
                 piexifJs.dump(state.exif),
                 imageData
