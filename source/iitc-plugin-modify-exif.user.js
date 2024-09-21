@@ -234,6 +234,23 @@
             TagValues: { ExifIFD, GPSIFD },
         } = piexifJs;
 
+        /** @type {import("zod")} */
+        const zod = await import(
+            // @ts-ignore
+            "https://cdn.jsdelivr.net/npm/zod@3.23.8/+esm"
+        );
+
+        const IExifElement = zod.record(zod.string(), zod.unknown());
+        const IExifElementOptional = IExifElement.optional();
+        const IExif = zod.object({
+            "0th": IExifElementOptional,
+            "1st": IExifElementOptional,
+            Exif: IExifElementOptional,
+            Interop: IExifElementOptional,
+            GPS: IExifElementOptional,
+            thumbnail: zod.string().optional(),
+        });
+
         /**
          * 実行時にフィールドに記録された型が仕様と合っていないと insert メソッドが例外を吐くため修正する
          * @param {import("piexif-ts").IExif} param0
@@ -313,6 +330,19 @@
                 }
             );
         }
+        /**
+         * @param {import("piexif-ts").IExif} exif
+         */
+        function stringifyExif(exif) {
+            return JSON.stringify(exif);
+        }
+        /**
+         * @param {string} source
+         * @returns {import("piexif-ts").IExif}
+         */
+        function parseExif(source) {
+            return IExif.parse(JSON.parse(source));
+        }
 
         const titleBar = document.createElement("div");
         titleBar.className = classNames.title;
@@ -330,13 +360,13 @@
         const latLngInput = document.createElement("input");
         fileInput.pattern = latLngInputPattern.source;
 
-        const exifText = document.createElement("div");
-        exifText.className = classNames["exif-text"];
+        const exifTextArea = document.createElement("textarea");
+        exifTextArea.className = classNames["exif-text"];
 
         const outputNameFormatInput = document.createElement("input");
 
         const details = document.createElement("details");
-        details.append(outputNameFormatInput, exifText);
+        details.append(outputNameFormatInput, exifTextArea);
 
         const setLatLngButton = document.createElement("button");
         setLatLngButton.textContent = "📍位置情報を設定";
@@ -375,7 +405,10 @@
         };
         function onStateUpdated() {
             console.debug("state updated");
-            exifText.textContent = JSON.stringify(state.exif);
+            const newExifText = stringifyExif(state.exif);
+            if (newExifText !== exifTextArea.value) {
+                exifTextArea.value = newExifText;
+            }
             const latLng = getLatLng(state.exif);
             const nextLatLngValue = latLng
                 ? `${latLng.lat}, ${latLng.lng}`
@@ -429,6 +462,10 @@
             if (!latLng) return;
             window.map.setView(latLng);
         }
+        function onExifTextValueChanged() {
+            state.exif = parseExif(exifTextArea.value);
+            onStateUpdated();
+        }
         async function onSaveButtonClickAsync() {
             if (state.imageFile == null) return;
 
@@ -466,6 +503,7 @@
             state.outputNameFormat = outputNameFormatInput.value;
             onStateUpdated();
         });
+        exifTextArea.addEventListener("change", onExifTextValueChanged);
         moveToLatLngButton.addEventListener("click", onMoveToLatLngClicked);
         fileInput.addEventListener("change", () =>
             onChangeFileAsync().catch(handleAsyncError)
