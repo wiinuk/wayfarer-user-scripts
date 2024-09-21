@@ -29,6 +29,7 @@
         padding: 0.3em;
         color: #f0ffee;
         text-align: center;
+        cursor: move;
     }
     .${classNames["file-image"]} {
         width: 120px;
