@@ -270,15 +270,24 @@
          */
         function getLatLng({ GPS }) {
             if (GPS == null) return;
-            const lat = GPSHelper.dmsRationalToDeg(
-                GPS[GPSIFD.GPSLatitude],
-                GPS[GPSIFD.GPSLatitudeRef]
-            );
-            const lng = GPSHelper.dmsRationalToDeg(
-                GPS[GPSIFD.GPSLongitude],
-                GPS[GPSIFD.GPSLongitudeRef]
-            );
-            return { lat, lng };
+            const {
+                [GPSIFD.GPSLatitudeRef]: latRef,
+                [GPSIFD.GPSLatitude]: lat,
+                [GPSIFD.GPSLongitudeRef]: lngRef,
+                [GPSIFD.GPSLongitude]: lng,
+            } = GPS;
+            if (
+                typeof latRef !== "string" ||
+                !Array.isArray(lat) ||
+                typeof lngRef !== "string" ||
+                Array.isArray(lng)
+            ) {
+                return;
+            }
+            return {
+                lat: GPSHelper.dmsRationalToDeg(lat, latRef),
+                lng: GPSHelper.dmsRationalToDeg(lng, lngRef),
+            };
         }
         /**
          * @param {import("piexif-ts").IExif} exif
@@ -346,7 +355,7 @@
 
         const titleBar = document.createElement("div");
         titleBar.className = classNames.title;
-        titleBar.textContent = "modify exif";
+        titleBar.textContent = "exif editor";
 
         const fileInput = document.createElement("input");
         fileInput.type = "file";
