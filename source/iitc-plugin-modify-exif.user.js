@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Modify Exif
+// @name         IITC plugin: modify exif
 // @namespace    http://tampermonkey.net/
 // @version      2024-09-20
-// @description  try to take over the world!
-// @author       You
+// @description  Edit the Exif information attached to the photo and save it to a file.
+// @author       Wiinuk
 // @match        https://intel.ingress.com/intel
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=ingress.com
 // @run-at       document-body
@@ -209,6 +209,9 @@
         }
     }
 
+    /**
+     * @param {unknown} e
+     */
     function handleAsyncError(e) {
         console.error(e);
     }
@@ -240,7 +243,11 @@
             "https://cdn.jsdelivr.net/npm/zod@3.23.8/+esm"
         );
 
-        const IExifElement = zod.record(zod.string(), zod.unknown());
+        const ExifRational = zod.tuple([zod.number(), zod.number()]);
+        const ExifNumber = zod.union([zod.number(), ExifRational]);
+        const ExifNumberArray = zod.tuple([ExifNumber]).rest(ExifNumber);
+        const ExifData = zod.union([ExifNumber, ExifNumberArray, zod.string()]);
+        const IExifElement = zod.record(zod.string(), ExifData);
         const IExifElementOptional = IExifElement.optional();
         const IExif = zod.object({
             "0th": IExifElementOptional,
@@ -250,10 +257,43 @@
             GPS: IExifElementOptional,
             thumbnail: zod.string().optional(),
         });
+        /**
+         * 型安全版
+         * @typedef {Zod.infer<typeof IExif>} IExif
+         * @typedef {Zod.infer<typeof IExifElement>} IExifElement
+         * @typedef {Zod.infer<typeof ExifDmsData>} ExifDmsData
+         */
+        const ExifDmsData = zod.tuple([
+            ExifRational,
+            ExifRational,
+            ExifRational,
+        ]);
+        const ExifRefData = zod.string();
+        /**
+         * @template T
+         * @typedef ElementFieldDescriptor
+         * @property {number} offset
+         * @property {Zod.ZodType<T>} type
+         */
+
+        /**
+         * @template T
+         * @param {number} offset
+         * @param {Zod.ZodType<T>} type
+         */
+        function createField(offset, type) {
+            return { offset, type };
+        }
+        const GPSFields = Object.freeze({
+            GPSLatitudeRef: createField(GPSIFD.GPSLatitudeRef, ExifRefData),
+            GPSLongitudeRef: createField(GPSIFD.GPSLongitudeRef, ExifRefData),
+            GPSLatitude: createField(GPSIFD.GPSLatitude, ExifDmsData),
+            GPSLongitude: createField(GPSIFD.GPSLongitude, ExifDmsData),
+        });
 
         /**
          * 実行時にフィールドに記録された型が仕様と合っていないと insert メソッドが例外を吐くため修正する
-         * @param {import("piexif-ts").IExif} param0
+         * @param {IExif} param0
          */
         function fixExif({ Exif }) {
             if (Exif) {
@@ -266,22 +306,35 @@
         }
 
         /**
-         * @param {import("piexif-ts").IExif} param0
+         * @template T
+         * @param {IExifElement} element
+         * @param {ElementFieldDescriptor<T>} field
+         */
+        function getField(element, field) {
+            return field.type.parse(element[field.offset]);
+        }
+        /**
+         * @template {Zod.infer<typeof ExifData>} T
+         * @param {IExifElement} element
+         * @param {ElementFieldDescriptor<T>} field
+         * @param {T} value
+         */
+        function setField(element, field, value) {
+            element[field.offset] = field.type.parse(value);
+        }
+
+        /**
+         * @param {IExif} param0
          */
         function getLatLng({ GPS }) {
             if (GPS == null) return;
-            const {
-                [GPSIFD.GPSLatitudeRef]: latRef,
-                [GPSIFD.GPSLatitude]: lat,
-                [GPSIFD.GPSLongitudeRef]: lngRef,
-                [GPSIFD.GPSLongitude]: lng,
-            } = GPS;
-            if (
-                typeof latRef !== "string" ||
-                !Array.isArray(lat) ||
-                typeof lngRef !== "string" ||
-                Array.isArray(lng)
-            ) {
+            let latRef, lngRef, lat, lng;
+            try {
+                latRef = getField(GPS, GPSFields.GPSLatitudeRef);
+                lngRef = getField(GPS, GPSFields.GPSLongitudeRef);
+                lat = getField(GPS, GPSFields.GPSLatitude);
+                lng = getField(GPS, GPSFields.GPSLongitude);
+            } catch {
                 return;
             }
             return {
@@ -289,20 +342,25 @@
                 lng: GPSHelper.dmsRationalToDeg(lng, lngRef),
             };
         }
+
+        const degToDmsRational = /** @type {(deg: number) => ExifDmsData} */ (
+            GPSHelper.degToDmsRational
+        );
+
         /**
-         * @param {import("piexif-ts").IExif} exif
+         * @param {IExif} exif
          * @param {number} lat
          * @param {number} lng
          */
         function setLatLng(exif, lat, lng) {
             const GPS = (exif.GPS ??= {});
-            GPS[GPSIFD.GPSLatitudeRef] = lat < 0 ? "S" : "N";
-            GPS[GPSIFD.GPSLatitude] = GPSHelper.degToDmsRational(lat);
-            GPS[GPSIFD.GPSLongitudeRef] = lng < 0 ? "W" : "E";
-            GPS[GPSIFD.GPSLongitude] = GPSHelper.degToDmsRational(lng);
+            setField(GPS, GPSFields.GPSLatitudeRef, lat < 0 ? "S" : "N");
+            setField(GPS, GPSFields.GPSLatitude, degToDmsRational(lat));
+            setField(GPS, GPSFields.GPSLongitudeRef, lng < 0 ? "W" : "E");
+            setField(GPS, GPSFields.GPSLongitude, degToDmsRational(lng));
         }
         /**
-         * @param {import("piexif-ts").IExif} param0
+         * @param {IExif} param0
          */
         function removeLatLng({ GPS }) {
             if (!GPS) return;
@@ -340,14 +398,14 @@
             );
         }
         /**
-         * @param {import("piexif-ts").IExif} exif
+         * @param {IExif} exif
          */
         function stringifyExif(exif) {
             return JSON.stringify(exif);
         }
         /**
          * @param {string} source
-         * @returns {import("piexif-ts").IExif}
+         * @returns {IExif}
          */
         function parseExif(source) {
             return IExif.parse(JSON.parse(source));
@@ -406,7 +464,7 @@
             title: "exif",
         });
 
-        /** @type {{ imageFile: File | null, exif: import("piexif-ts").IExif, outputNameFormat: string }}*/
+        /** @type {{ imageFile: File | null, exif: IExif, outputNameFormat: string }}*/
         const state = {
             imageFile: null,
             exif: {},
@@ -446,7 +504,7 @@
             }
 
             const dataUrl = await readFileAs("data-url", file0);
-            state.exif = piexifJs.load(dataUrl);
+            state.exif = IExif.parse(piexifJs.load(dataUrl));
             state.imageFile = file0;
 
             fileImage.src = dataUrl;
