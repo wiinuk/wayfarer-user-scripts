@@ -28,7 +28,7 @@ const config = {
         "plugin:@typescript-eslint/recommended",
         "prettier",
     ],
-    ignorePatterns: "*.js",
+    // ignorePatterns: "*.js",
     rules: {
         "rulesdir/no-unused-await": "warn",
         "rulesdir/no-unused-optional-chain": "warn",
@@ -45,6 +45,8 @@ const config = {
         "object-shorthand": "warn",
         "no-useless-rename": "warn",
         "no-duplicate-imports": "warn",
+        "prefer-const": "warn",
+        "no-undef": "off",
     },
 };
 module.exports = config;
