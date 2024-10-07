@@ -647,6 +647,7 @@ function wrapper(plugin_info) {
         window.map.on("overlayadd", delayedUpdatePortalLabels);
         window.map.on("overlayremove", delayedUpdatePortalLabels);
         window.map.on("zoomend", clearAllPortalLabels);
+        delayedUpdatePortalLabels();
     }
 
     const setup = function () {
