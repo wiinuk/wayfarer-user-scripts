@@ -141,30 +141,38 @@ function wrapper(plugin_info) {
         /** @type {unknown} */ (globalThis.window)
     );
 
-    if (typeof window.plugin !== "function") window.plugin = function () {};
+    if (typeof window.plugin !== "function")
+        window.plugin = function () {
+            // marker function
+        };
     plugin_info.dateTimeVersion = "20240825000000";
     plugin_info.pluginId = "portal-names-ex";
 
     const NAME_WIDTH = 80;
     const NAME_HEIGHT = 23;
-    const MAX_LABEL_COUNT = 100;
+    // マップの面積に対してラベルが占める面積の最大値
+    const MAX_LABEL_AREA_PER_MAP = 0.1;
     /** @type {Record<string, L.ILayer>} */
     const labelLayers = {};
     /** @type {L.LayerGroup<L.ILayer>} */
     let labelLayerGroup;
 
+    const pluginClassName = `plugin-portal-names-ex`;
     function setupCSS() {
         $("<style>")
             .prop("type", "text/css")
             .html(
-                "" +
-                    ".plugin-portal-names-ex{" +
-                    "color:#FFFFBB;" +
-                    "font-size:11px;line-height:12px;" +
-                    "text-align:center;padding: 2px;" +
-                    "overflow:hidden;" +
-                    "text-shadow:1px 1px #000,1px -1px #000,-1px 1px #000,-1px -1px #000, 0 0 5px #000;" +
-                    "}"
+                `
+                .${pluginClassName} {
+                    color:  #FFFFBB;
+                    font-size: 11px;
+                    line-height: 12px;
+                    text-align: center;
+                    padding: 2px;
+                    overflow: hidden;
+                    text-shadow: 1px 1px #000, 1px -1px #000, -1px 1px #000, -1px -1px #000, 0 0 5px #000;
+                }
+            `
             )
             .appendTo("head");
     }
@@ -182,17 +190,20 @@ function wrapper(plugin_info) {
 
     /**
      * @param {string} guid
-     * @param {L.LatLngExpression} latLng
      */
-    function addLabel(guid, latLng) {
+    function addLabel(guid) {
         const previousLayer = labelLayers[guid];
         if (!previousLayer) {
-            const d = window.portals[guid].options.data;
+            const portal = window.portals[guid];
+            if (!portal) return;
+
+            const d = portal.options.data;
             const portalName = d.title;
 
+            const latLng = portal.getLatLng();
             const label = L.marker(latLng, {
                 icon: L.divIcon({
-                    className: "plugin-portal-names-ex",
+                    className: pluginClassName,
                     iconAnchor: [NAME_WIDTH / 2, 0],
                     iconSize: [NAME_WIDTH, NAME_HEIGHT],
                     html: portalName,
@@ -395,11 +406,12 @@ function wrapper(plugin_info) {
     }
     /**
      * @param {IITCPortalData} p
+     * @returns 0…1
      */
     function portalPriority(p) {
         const eventCount =
             p.ornaments?.filter((o) => o !== "sc5_p")?.length ?? 0;
-        return eventCount + currentPortalCost(p);
+        return currentPortalCost(p) * 0.5 + Math.max(eventCount, 0) * 0.5;
     }
     /**
      * @param {PortalWithPoint} p1
@@ -430,12 +442,12 @@ function wrapper(plugin_info) {
      * @param {Promise<void>} promise
      * @param {() => void} [onCancel]
      */
-    async function cancelToReject(promise, onCancel = () => {}) {
+    async function cancelToReject(promise, onCancel) {
         try {
             return await promise;
         } catch (e) {
             if (e instanceof Error && e.name === "AbortError") {
-                return onCancel();
+                return onCancel?.();
             }
             throw e;
         }
@@ -536,6 +548,12 @@ function wrapper(plugin_info) {
         };
     }
 
+    function getMaxLabelCount(/** @type {L.Map} */ map) {
+        const { x, y } = map.getPixelBounds().getSize();
+        const mapArea = x * y;
+        const labelArea = NAME_HEIGHT * NAME_WIDTH;
+        return Math.ceil((mapArea * MAX_LABEL_AREA_PER_MAP) / labelArea);
+    }
     /**
      * @param {object} param0
      * @param {AbortSignal} param0.signal
@@ -551,7 +569,10 @@ function wrapper(plugin_info) {
         let notCollidedPortals = getNotCollidedPortals(namedPortals);
 
         // ラベルの数に上限を設け、重要度が上位のポータルのみを表示する
-        notCollidedPortals = notCollidedPortals.slice(0, MAX_LABEL_COUNT);
+        notCollidedPortals = notCollidedPortals.slice(
+            0,
+            getMaxLabelCount(window.map)
+        );
 
         /** @type {Map<string, PortalWithPoint>} */
         const labeledPortals = new Map();
@@ -565,7 +586,7 @@ function wrapper(plugin_info) {
             }
         }
         for (const guid of labeledPortals.keys()) {
-            addLabel(guid, window.portals[guid].getLatLng());
+            addLabel(guid);
             if (scheduler.yieldRequested) await scheduler.yield({ signal });
         }
     }
@@ -576,7 +597,7 @@ function wrapper(plugin_info) {
      */
     function waitUntilAnyLayerAdded(map) {
         return new Promise((resolve) => {
-            const onLayerAdd = (/** @type {L.LeafletLayerEvent} */ e) => {
+            const onLayerAdd = (/** @type {L.LeafletLayerEvent} */ _) => {
                 map.off("layeradd", onLayerAdd);
                 resolve();
             };
