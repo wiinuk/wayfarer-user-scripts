@@ -16,14 +16,27 @@
     "use strict";
 
     const pluginName = "iitc-plugin-modify-exif";
-    const classNames = {
-        title: pluginName + "-title",
-        "file-image": pluginName + "-file-image",
-        "exif-text": pluginName + "-exif-text",
-        "modify-container": pluginName + "-modify-container",
-    };
+    /**
+     * @template {{}} TKeys
+     * @param {TKeys} keys
+     */
+    function createClassNames(keys) {
+        /** @type {Record<keyof TKeys, string>} */
+        const result = Object.create(null);
+        for (const key of Object.keys(keys)) {
+            result[key] = pluginName + key;
+        }
+        return result;
+    }
+    const classNames = createClassNames({
+        title: 0,
+        "file-image-container": 0,
+        "file-image": 0,
+        "exif-text": 0,
+        "modify-container": 0,
+    });
     const css = `
-    .${classNames["title"]} {
+    .${classNames.title} {
         user-select: none;
         background: #065d498a;
         padding: 0.3em;
@@ -31,8 +44,14 @@
         text-align: center;
         cursor: move;
     }
+    .${classNames["file-image-container"]} {
+      overflow: hidden;
+      flex-grow: 1;
+    }
     .${classNames["file-image"]} {
-        width: 120px;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
     }
     .${classNames["exif-text"]} {
         width: 100%;
@@ -380,7 +399,7 @@
             return { lat: parseFloat(lat), lng: parseFloat(lng) };
         }
 
-        const defaultOutputNameFormat = "${name}_modified";
+        const defaultOutputNameFormat = "${name}";
         /**
          * @param {string} format
          * @param {string} fileName
@@ -422,6 +441,10 @@
         const fileImage = document.createElement("img");
         fileImage.className = classNames["file-image"];
 
+        const fileImageContainer = document.createElement("div");
+        fileImageContainer.className = classNames["file-image-container"];
+        fileImageContainer.append(fileImage);
+
         const latLngInputPattern =
             /(?<lat>[-+]?\d+(\.\d+)?).*?(?<lng>[-+]?\d+(\.\d+)?)/;
         const latLngInput = document.createElement("input");
@@ -452,7 +475,7 @@
         modifyContainer.append(
             titleBar,
             fileInput,
-            fileImage,
+            fileImageContainer,
             latLngInput,
             details,
             buttonContainer
@@ -464,19 +487,23 @@
             title: "exif",
         });
 
-        /** @type {{ imageFile: File | null, exif: IExif, outputNameFormat: string }}*/
+        /** @type {{ imageFile: File | null, exif: IExif | null, outputNameFormat: string, errorMessage: string | null }}*/
         const state = {
             imageFile: null,
             exif: {},
             outputNameFormat: defaultOutputNameFormat,
+            errorMessage: null,
         };
         function onStateUpdated() {
-            console.debug("state updated");
-            const newExifText = stringifyExif(state.exif);
-            if (newExifText !== exifTextArea.value) {
-                exifTextArea.value = newExifText;
+            if (state.exif) {
+                const newExifText = stringifyExif(state.exif);
+                if (newExifText !== exifTextArea.value) {
+                    exifTextArea.value = newExifText;
+                }
+            } else {
+                exifTextArea.value = `Exif 読み取りエラー: ${state.errorMessage}`;
             }
-            const latLng = getLatLng(state.exif);
+            const latLng = state.exif ? getLatLng(state.exif) : undefined;
             const nextLatLngValue = latLng
                 ? `${latLng.lat}, ${latLng.lng}`
                 : "位置情報なし";
@@ -504,13 +531,21 @@
             }
 
             const dataUrl = await readFileAs("data-url", file0);
-            state.exif = IExif.parse(piexifJs.load(dataUrl));
+            try {
+                state.exif = IExif.parse(piexifJs.load(dataUrl));
+                state.errorMessage = null;
+            } catch (e) {
+                state.exif = null;
+                state.errorMessage = e instanceof Error ? e.message : String(e);
+            }
             state.imageFile = file0;
 
             fileImage.src = dataUrl;
             onStateUpdated();
         }
         function onChangeLatLng() {
+            if (state.exif == null) return;
+
             const latLng = parseLatLng(latLngInput.value);
             if (latLng) {
                 setLatLng(state.exif, latLng.lat, latLng.lng);
@@ -520,11 +555,15 @@
             onStateUpdated();
         }
         function onPinChanged() {
+            if (state.exif == null) return;
+
             const latLng = pinLayer.getLatLng();
             setLatLng(state.exif, latLng.lat, latLng.lng);
             onStateUpdated();
         }
         function onMoveToLatLngClicked() {
+            if (state.exif == null) return;
+
             const latLng = getLatLng(state.exif);
             if (!latLng) return;
             window.map.setView(latLng);
@@ -534,7 +573,7 @@
             onStateUpdated();
         }
         async function onSaveButtonClickAsync() {
-            if (state.imageFile == null) return;
+            if (state.imageFile == null || state.exif == null) return;
 
             const fileName = state.imageFile.name;
             const imageData = await readFileAs("data-url", state.imageFile);
@@ -562,6 +601,7 @@
 
         pinLayer.addEventListener("move", onPinChanged);
         setLatLngButton.addEventListener("click", () => {
+            if (state.exif == null) return;
             const center = window.map.getCenter();
             setLatLng(state.exif, center.lat, center.lng);
             onStateUpdated();
