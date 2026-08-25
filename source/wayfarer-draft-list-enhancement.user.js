@@ -85,6 +85,31 @@
         return value;
     }
 
+    /**
+     * @param {DraftsResponse} data
+     */
+    function loadDraftCoordinates(data) {
+        if (data && data.result && Array.isArray(data.result.result)) {
+            data.result.result.forEach((item) => {
+                if (
+                    item.title &&
+                    item.lat !== undefined &&
+                    item.lng !== undefined
+                ) {
+                    draftCoordsMap.set(item.title.trim(), {
+                        lat: item.lat,
+                        lng: item.lng,
+                        id: item.id,
+                    });
+                }
+            });
+            console.log(
+                "[Wayfarer Draft Sorter] Coordinates loaded:",
+                draftCoordsMap
+            );
+        }
+    }
+
     // fetchをフックしてAPIのレスポンスから正確な座標を取得
     const originalFetch = window.fetch;
     window.fetch = async function (...args) {
@@ -103,26 +128,7 @@
 
                 /** @type {DraftsResponse} */
                 const data = await clone.json();
-
-                if (data && data.result && Array.isArray(data.result.result)) {
-                    data.result.result.forEach((item) => {
-                        if (
-                            item.title &&
-                            item.lat !== undefined &&
-                            item.lng !== undefined
-                        ) {
-                            draftCoordsMap.set(item.title.trim(), {
-                                lat: item.lat,
-                                lng: item.lng,
-                                id: item.id,
-                            });
-                        }
-                    });
-                    console.log(
-                        "[Wayfarer Draft Sorter] Coordinates loaded:",
-                        draftCoordsMap
-                    );
-                }
+                loadDraftCoordinates(data);
             } catch (e) {
                 console.error(
                     "[Wayfarer Draft Sorter] Error parsing API response:",
@@ -131,6 +137,37 @@
             }
         }
         return response;
+    };
+
+    // XMLHttpRequestをフックして、fetchを使わないAPIリクエストも処理
+    const xhrUrls = new WeakMap();
+    const originalXhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (/** @type {any} */ ...args) {
+        xhrUrls.set(this, String(args[1]));
+        return originalXhrOpen.apply(this, args);
+    };
+
+    const originalXhrSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (/** @type {any} */ ...args) {
+        this.addEventListener("load", () => {
+            const url = xhrUrls.get(this);
+            if (!url || !url.includes("/api/v1/vault/submit/get/drafts"))
+                return;
+
+            try {
+                const data =
+                    this.responseType === "json"
+                        ? this.response
+                        : JSON.parse(this.responseText);
+                loadDraftCoordinates(data);
+            } catch (e) {
+                console.error(
+                    "[Wayfarer Draft Sorter] Error parsing XHR response:",
+                    e
+                );
+            }
+        });
+        return originalXhrSend.apply(this, args);
     };
 
     // ソートボタンの追加と実行処理
