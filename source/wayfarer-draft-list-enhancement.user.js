@@ -121,7 +121,7 @@
         }
 
         locationCheckInProgress = true;
-        sortButton.innerText = "並び順: 近い順（現在地を確認中...）";
+        sortButton.innerText = "近い順（現在地を確認中...）";
         const sortLatitude = assertsNonNull(draftSortState.latitude);
         const sortLongitude = assertsNonNull(draftSortState.longitude);
         navigator.geolocation.getCurrentPosition(
@@ -133,14 +133,13 @@
                     position.coords.latitude,
                     position.coords.longitude
                 );
-                sortButton.innerText = `並び順: 近い順（現在地とのズレは約 ${formatDistance(
+                sortButton.innerText = `近い順（基準地点から約 ${formatDistance(
                     distance
                 )}）`;
             },
             (error) => {
                 locationCheckInProgress = false;
-                sortButton.innerText =
-                    "並び順: 近い順（現在地を取得できません）";
+                sortButton.innerText = "近い順（現在地を取得できません）";
                 console.warn(
                     "[Wayfarer Draft Sorter] Could not check current location:",
                     error
@@ -205,19 +204,12 @@
     }
 
     /**
-     * @typedef {{type?: string, path: string, value: string}} InvestigationMatch
-     */
-
-    /**
-     * @typedef {{lat: number, lng: number}} DraftCoordinates
-     */
-    /**
      * @template T
      * @typedef {T & { readonly __ngContext__?: unknown }} WithContext
      */
 
     /**
-     * @typedef {{id: string, matches: InvestigationMatch[]}} InvestigationResult
+     * @typedef {{path: string, value: string}} ContextMatch
      */
 
     /**
@@ -377,32 +369,10 @@
     };
 
     /**
-     * @param {Element} element
-     */
-    function getElementPath(element) {
-        /** @type {string[]} */
-        const parts = [];
-        /** @type {Element | null} */
-        let current = element;
-        while (current && current.nodeType === Node.ELEMENT_NODE) {
-            let part = current.tagName.toLowerCase();
-            if (current.id) part += `#${current.id}`;
-            if (current.classList.length > 0) {
-                part += `.${Array.from(current.classList)
-                    .slice(0, 2)
-                    .join(".")}`;
-            }
-            parts.unshift(part);
-            current = current.parentElement;
-        }
-        return parts.join(" > ");
-    }
-
-    /**
      * @param {unknown} value
      * @param {string} path
      * @param {string} id
-     * @param {InvestigationMatch[]} matches
+     * @param {ContextMatch[]} matches
      * @param {WeakSet<object>} visited
      * @param {{nodes: number}} state
      * @param {number} depth
@@ -479,7 +449,7 @@
         }
 
         for (const id of draftMap.keys()) {
-            /** @type {InvestigationMatch[]} */
+            /** @type {ContextMatch[]} */
             const matches = [];
             /** @type {WeakSet<object>} */
             const visited = new WeakSet();
@@ -495,81 +465,6 @@
             if (matches.length > 0) return id;
         }
         return undefined;
-    }
-
-    async function investigateDraftIds() {
-        const ids = Array.from(draftMap.keys());
-        /** @type {InvestigationResult[]} */
-        const results = ids.map((id) => ({ id, matches: [] }));
-        /** @type {Map<string, InvestigationResult>} */
-        const resultById = new Map(
-            results.map((result) => [result.id, result])
-        );
-        const elements = Array.from(document.querySelectorAll("*"));
-
-        elements.forEach((element) => {
-            const elementPath = getElementPath(element);
-            const attributes = Array.from(element.attributes);
-            ids.forEach((id) => {
-                const result = resultById.get(id);
-                if (!result) return;
-
-                attributes.forEach((attribute) => {
-                    if (attribute.value === id) {
-                        result.matches.push({
-                            type: "attribute",
-                            path: `${elementPath}[@${attribute.name}]`,
-                            value: attribute.value.slice(0, 500),
-                        });
-                    }
-                });
-                if (element.textContent === id) {
-                    result.matches.push({
-                        type: "textContent",
-                        path: elementPath,
-                        value: element.textContent.trim().slice(0, 500),
-                    });
-                }
-                const elementWithContext =
-                    /** @type {WithContext<typeof element>} */ (element);
-                if (elementWithContext.__ngContext__) {
-                    /** @type {WeakSet<object>} */
-                    const visited = new WeakSet();
-                    inspectValue(
-                        elementWithContext.__ngContext__,
-                        `${elementPath}.__ngContext__`,
-                        id,
-                        result.matches,
-                        visited,
-                        { nodes: 0 },
-                        0
-                    );
-                }
-            });
-        });
-
-        const report = {
-            generatedAt: new Date().toISOString(),
-            apiIds: ids,
-            scannedElements: elements.length,
-            results,
-        };
-        const reportText = JSON.stringify(report, null, 2);
-        try {
-            await navigator.clipboard.writeText(reportText);
-            alert("ID調査結果をクリップボードにコピーしました。");
-        } catch (e) {
-            const textarea = document.createElement("textarea");
-            textarea.value = reportText;
-            textarea.style.position = "fixed";
-            textarea.style.opacity = "0";
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            textarea.remove();
-            alert("ID調査結果をクリップボードにコピーしました。");
-        }
-        console.log("[Wayfarer Draft Sorter] ID investigation:", report);
     }
 
     /**
@@ -627,7 +522,7 @@
     function getDraftFilterLabel() {
         if (draftFilterState === "ready") return "準備完了";
         if (draftFilterState === "not-ready") return "不可";
-        return "絞り込まない";
+        return "";
     }
 
     function getSortModeLabel() {
@@ -651,25 +546,11 @@
 
         const btn = document.createElement("button");
         btn.id = "sort-drafts-btn";
-        btn.innerText = `並び順: ${getSortModeLabel()}`;
+        btn.innerText = getSortModeLabel();
         btn.style.cssText =
             "margin-left: 15px; padding: 6px 12px; cursor: pointer; background-color: #f53d00; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
 
         draftHeader.appendChild(btn);
-
-        const inspectBtn = document.createElement("button");
-        inspectBtn.id = "inspect-draft-ids-btn";
-        inspectBtn.innerText = "🔎 ID調査結果をコピー";
-        inspectBtn.style.cssText =
-            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #444; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
-        draftHeader.appendChild(inspectBtn);
-        inspectBtn.addEventListener("click", async () => {
-            inspectBtn.disabled = true;
-            inspectBtn.innerText = "調査中...";
-            await investigateDraftIds();
-            inspectBtn.innerText = "🔎 ID調査結果をコピー";
-            inspectBtn.disabled = false;
-        });
 
         const filterBtn = document.createElement("button");
         filterBtn.id = "filter-drafts-btn";
@@ -699,7 +580,7 @@
                     sortMode: "last-modified",
                 };
                 saveDraftState();
-                btn.innerText = `並び順: ${getSortModeLabel()}`;
+                btn.innerText = getSortModeLabel();
                 return;
             }
 
@@ -709,7 +590,7 @@
                     sortMode: "unsorted",
                 };
                 saveDraftState();
-                btn.innerText = `並び順: ${getSortModeLabel()}`;
+                btn.innerText = getSortModeLabel();
                 return;
             }
 
@@ -724,7 +605,7 @@
                         alert(
                             "ソート対象の下書きが見つかりませんでした。ページを更新して再試行してください。"
                         );
-                        btn.innerText = `並び順: ${getSortModeLabel()}`;
+                        btn.innerText = getSortModeLabel();
                         btn.disabled = false;
                         return;
                     }
@@ -737,14 +618,14 @@
                     };
                     saveDraftState();
 
-                    btn.innerText = `並び順: 近い順（現在地とのズレは約 ${formatDistance(
+                    btn.innerText = `近い順（基準地点から約 ${formatDistance(
                         0
                     )}）`;
                     btn.disabled = false;
                 },
                 (err) => {
                     alert("位置情報の取得に失敗しました: " + err.message);
-                    btn.innerText = `並び順: ${getSortModeLabel()}`;
+                    btn.innerText = getSortModeLabel();
                     btn.disabled = false;
                 }
             );
