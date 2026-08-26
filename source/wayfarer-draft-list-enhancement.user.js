@@ -56,6 +56,12 @@
     /** @type {Map<string, DraftCoordinates>} */
     const draftCoordsMap = new Map();
 
+    /** @type {Map<string, boolean>} */
+    const draftReadinessMap = new Map();
+
+    /** @type {'all' | 'ready' | 'not-ready'} */
+    let draftFilterState = "all";
+
     // 2点間の直線距離（km）を計算する関数（Haversine formula）
     /**
      * @param {number} lat1
@@ -118,7 +124,26 @@
                         lng: item.lng,
                     });
                 }
+                if (item.id) {
+                    draftReadinessMap.set(
+                        item.id,
+                        Boolean(
+                            (item.mainImageGcsPath ||
+                                item.mainImageServingUrl) &&
+                                ((item.supportingImageGcsPaths &&
+                                    item.supportingImageGcsPaths.length > 0) ||
+                                    (item.supportingImageServingUrls &&
+                                        item.supportingImageServingUrls.length >
+                                            0)) &&
+                                typeof item.title === "string" &&
+                                item.title.trim().length > 0 &&
+                                typeof item.description === "string" &&
+                                item.description.trim().length > 0
+                        )
+                    );
+                }
             });
+            if (draftFilterState !== "all") applyDraftFilter();
             console.log(
                 "[Wayfarer Draft Sorter] Coordinates loaded:",
                 draftCoordsMap
@@ -383,6 +408,49 @@
         console.log("[Wayfarer Draft Sorter] ID investigation:", report);
     }
 
+    /**
+     * @param {Element} element
+     * @returns {HTMLElement | null}
+     */
+    function getDraftCardContainer(element) {
+        /** @type {HTMLElement | null} */
+        let cardContainer =
+            element.closest('div[class*="card"], div[class*="item"]') ||
+            element.parentElement;
+
+        if (cardContainer == null) return null;
+
+        while (
+            cardContainer.parentElement &&
+            cardContainer.parentElement.children.length < 2
+        ) {
+            cardContainer = cardContainer.parentElement;
+        }
+        return cardContainer;
+    }
+
+    function applyDraftFilter() {
+        document.querySelectorAll("h3").forEach((h3) => {
+            const draftId = getDraftIdForCard(h3);
+            const readiness = draftId
+                ? draftReadinessMap.get(draftId)
+                : undefined;
+            const cardContainer = getDraftCardContainer(h3);
+
+            if (cardContainer == null || readiness === undefined) return;
+
+            cardContainer.hidden =
+                draftFilterState !== "all" &&
+                (draftFilterState === "ready") !== readiness;
+        });
+    }
+
+    function getDraftFilterLabel() {
+        if (draftFilterState === "ready") return "準備完了";
+        if (draftFilterState === "not-ready") return "不備";
+        return "全て";
+    }
+
     // ソートボタンの追加と実行処理
     function addSortButton() {
         if (document.getElementById("sort-drafts-btn")) return;
@@ -417,6 +485,23 @@
             inspectBtn.disabled = false;
         });
 
+        const filterBtn = document.createElement("button");
+        filterBtn.id = "filter-drafts-btn";
+        filterBtn.innerText = `提出: ${getDraftFilterLabel()}`;
+        filterBtn.style.cssText =
+            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #1976d2; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
+        draftHeader.appendChild(filterBtn);
+        filterBtn.addEventListener("click", () => {
+            draftFilterState =
+                draftFilterState === "all"
+                    ? "ready"
+                    : draftFilterState === "ready"
+                    ? "not-ready"
+                    : "all";
+            filterBtn.innerText = `提出: ${getDraftFilterLabel()}`;
+            applyDraftFilter();
+        });
+
         btn.addEventListener("click", () => {
             btn.innerText = "位置情報を取得中...";
             btn.disabled = true;
@@ -442,20 +527,9 @@
                             : undefined;
 
                         // h3の親方向へ遡って最も近いカードコンテナ要素を取得
-                        /** @type {HTMLElement | null} */
-                        let cardContainer =
-                            h3.closest(
-                                'div[class*="card"], div[class*="item"]'
-                            ) || h3.parentElement;
+                        const cardContainer = getDraftCardContainer(h3);
 
                         if (cardContainer == null) return;
-
-                        while (
-                            cardContainer.parentElement &&
-                            cardContainer.parentElement.children.length < 2
-                        ) {
-                            cardContainer = cardContainer.parentElement;
-                        }
 
                         if (coords) {
                             const dist = getDistance(
@@ -533,6 +607,7 @@
     // ページの動的描画に対応
     const observer = new MutationObserver(() => {
         addSortButton();
+        if (draftFilterState !== "all") applyDraftFilter();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 })();
