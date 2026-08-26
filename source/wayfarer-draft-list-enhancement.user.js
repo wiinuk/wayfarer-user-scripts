@@ -121,7 +121,7 @@
         }
 
         locationCheckInProgress = true;
-        sortButton.innerText = "並び順: 距離順（現在地を確認中...）";
+        sortButton.innerText = "並び順: 近い順（現在地を確認中...）";
         const sortLatitude = assertsNonNull(draftSortState.latitude);
         const sortLongitude = assertsNonNull(draftSortState.longitude);
         navigator.geolocation.getCurrentPosition(
@@ -133,14 +133,14 @@
                     position.coords.latitude,
                     position.coords.longitude
                 );
-                sortButton.innerText = `並び順: 距離順（基準地点から約 ${formatDistance(
+                sortButton.innerText = `並び順: 近い順（現在地とのズレは約 ${formatDistance(
                     distance
                 )}）`;
             },
             (error) => {
                 locationCheckInProgress = false;
                 sortButton.innerText =
-                    "並び順: 距離順（現在地を取得できません）";
+                    "並び順: 近い順（現在地を取得できません）";
                 console.warn(
                     "[Wayfarer Draft Sorter] Could not check current location:",
                     error
@@ -626,14 +626,15 @@
 
     function getDraftFilterLabel() {
         if (draftFilterState === "ready") return "準備完了";
-        if (draftFilterState === "not-ready") return "不備";
+        if (draftFilterState === "not-ready") return "不可";
         return "絞り込まない";
     }
 
     function getSortModeLabel() {
-        if (draftSortState.sortMode === "distance") return "距離順";
-        if (draftSortState.sortMode === "last-modified") return "最終更新順";
-        return "未ソート";
+        if (draftSortState.sortMode === "distance") return "近い順";
+        if (draftSortState.sortMode === "last-modified")
+            return "最近変更した順";
+        return "並び替えない";
     }
 
     // ソートボタンの追加と実行処理
@@ -736,7 +737,7 @@
                     };
                     saveDraftState();
 
-                    btn.innerText = `並び順: 距離順（基準地点から約 ${formatDistance(
+                    btn.innerText = `並び順: 近い順（現在地とのズレは約 ${formatDistance(
                         0
                     )}）`;
                     btn.disabled = false;
