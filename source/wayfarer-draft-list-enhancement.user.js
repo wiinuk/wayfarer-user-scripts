@@ -52,27 +52,23 @@
      * @property {boolean} captcha 例: false
      */
 
-    // APIから取得した下書きデータを保持するマップ (id -> {lat, lng})
-    /** @type {Map<string, DraftCoordinates>} */
-    const draftCoordsMap = new Map();
-
-    /** @type {Map<string, boolean>} */
-    const draftReadinessMap = new Map();
+    // APIから取得した下書きデータを保持するマップ
+    /** @type {Map<string, PoiItem>} */
+    const draftMap = new Map();
 
     /** @type {'all' | 'ready' | 'not-ready'} */
     let draftFilterState = "all";
 
     const draftStateStorageKey = "wayfarer-draft-list-state";
-    const draftStateVersion = "1";
+    const draftStateVersion = "2";
     /**
-     * @typedef {{version: "1", filter: 'all' | 'ready' | 'not-ready', sorted: boolean, latitude?: number, longitude?: number}} DraftListStateV1
-     * @typedef {DraftListStateV1} DraftListState
+     * @typedef {{version: "2", filter: 'all' | 'ready' | 'not-ready', sortMode: 'unsorted' | 'distance' | 'last-modified', latitude?: number, longitude?: number}} DraftListState
      */
     /** @type {DraftListState} */
     let draftSortState = {
         version: draftStateVersion,
         filter: "all",
-        sorted: false,
+        sortMode: "unsorted",
     };
     /** @type {number | null} */
     let draftStateApplyTimer = null;
@@ -116,7 +112,7 @@
      */
     function checkCurrentLocation(sortButton) {
         if (
-            !draftSortState.sorted ||
+            draftSortState.sortMode !== "distance" ||
             draftSortState.latitude === undefined ||
             draftSortState.longitude === undefined ||
             locationCheckInProgress
@@ -125,7 +121,7 @@
         }
 
         locationCheckInProgress = true;
-        sortButton.innerText = "距離順に並べ替え（現在地を確認中...）";
+        sortButton.innerText = "並び順: 距離順（現在地を確認中...）";
         const sortLatitude = assertsNonNull(draftSortState.latitude);
         const sortLongitude = assertsNonNull(draftSortState.longitude);
         navigator.geolocation.getCurrentPosition(
@@ -137,14 +133,14 @@
                     position.coords.latitude,
                     position.coords.longitude
                 );
-                sortButton.innerText = `距離順に並べ替え（基準地点から約 ${formatDistance(
+                sortButton.innerText = `並び順: 距離順（基準地点から約 ${formatDistance(
                     distance
                 )}）`;
             },
             (error) => {
                 locationCheckInProgress = false;
                 sortButton.innerText =
-                    "距離順に並べ替え（現在地を取得できません）";
+                    "並び順: 距離順（現在地を取得できません）";
                 console.warn(
                     "[Wayfarer Draft Sorter] Could not check current location:",
                     error
@@ -160,15 +156,20 @@
         draftStateApplyTimer = window.setTimeout(() => {
             draftStateApplyTimer = null;
             if (draftFilterState !== "all") applyDraftFilter();
-            if (
-                draftSortState.sorted &&
-                draftSortState.latitude !== undefined &&
-                draftSortState.longitude !== undefined
-            ) {
+            if (draftSortState.sortMode === "distance") {
+                if (
+                    draftSortState.latitude === undefined ||
+                    draftSortState.longitude === undefined
+                ) {
+                    return;
+                }
                 sortDraftCards(
                     draftSortState.latitude,
-                    draftSortState.longitude
+                    draftSortState.longitude,
+                    "distance"
                 );
+            } else if (draftSortState.sortMode === "last-modified") {
+                sortDraftCards(0, 0, "last-modified");
             }
         }, 100);
     }
@@ -222,17 +223,18 @@
     /**
      * @param {number} userLat
      * @param {number} userLon
+     * @param {'distance' | 'last-modified'} sortMode
      * @returns {boolean}
      */
-    function sortDraftCards(userLat, userLon) {
+    function sortDraftCards(userLat, userLon, sortMode) {
         const h3Elements = Array.from(document.querySelectorAll("h3"));
-        /** @type {{element: HTMLElement, title: string, distance: number}[]} */
+        /** @type {{element: HTMLElement, title: string, distance: number, lastModified: number}[]} */
         const cardItems = [];
 
         h3Elements.forEach((h3) => {
             const title = h3.innerText.trim();
             const draftId = getDraftIdForCard(h3);
-            const coords = draftId ? draftCoordsMap.get(draftId) : undefined;
+            const draft = draftId ? draftMap.get(draftId) : undefined;
             const cardContainer = getDraftCardContainer(h3);
 
             if (cardContainer == null) return;
@@ -240,15 +242,27 @@
             cardItems.push({
                 element: cardContainer,
                 title: title,
-                distance: coords
-                    ? getDistance(userLat, userLon, coords.lat, coords.lng)
-                    : Infinity,
+                distance:
+                    sortMode === "distance" &&
+                    draft &&
+                    draft.lat !== undefined &&
+                    draft.lng !== undefined
+                        ? getDistance(userLat, userLon, draft.lat, draft.lng)
+                        : Infinity,
+                lastModified:
+                    draft && typeof draft.lastModified === "number"
+                        ? draft.lastModified
+                        : Infinity,
             });
         });
 
         if (cardItems.length === 0) return false;
 
-        cardItems.sort((a, b) => a.distance - b.distance);
+        cardItems.sort((a, b) =>
+            sortMode === "distance"
+                ? a.distance - b.distance
+                : b.lastModified - a.lastModified
+        );
         const parent = assertsNonNull(cardItems[0].element.parentElement);
         const needsReorder = cardItems.some(
             (item, index) => parent.children[index] !== item.element
@@ -256,22 +270,24 @@
         cardItems.forEach((item) => {
             if (needsReorder) parent.appendChild(item.element);
 
-            /** @type {HTMLElement | null} */
-            let distBadge = item.element.querySelector(".distance-badge");
-            if (!distBadge) {
-                distBadge = document.createElement("span");
-                distBadge.className = "distance-badge";
-                distBadge.style.cssText =
-                    "margin-left: 10px; font-size: 12px; color: #f53d00; font-weight: bold; background: #ffebeb; padding: 2px 6px; border-radius: 4px;";
-                const h3 = item.element.querySelector("h3");
-                if (h3) h3.appendChild(distBadge);
-            }
-            const distanceLabel =
-                item.distance !== Infinity
-                    ? `約 ${item.distance.toFixed(2)} km`
-                    : "位置不明";
-            if (distBadge.innerText !== distanceLabel) {
-                distBadge.innerText = distanceLabel;
+            if (sortMode === "distance") {
+                /** @type {HTMLElement | null} */
+                let distBadge = item.element.querySelector(".distance-badge");
+                if (!distBadge) {
+                    distBadge = document.createElement("span");
+                    distBadge.className = "distance-badge";
+                    distBadge.style.cssText =
+                        "margin-left: 10px; font-size: 12px; color: #f53d00; font-weight: bold; background: #ffebeb; padding: 2px 6px; border-radius: 4px;";
+                    const h3 = item.element.querySelector("h3");
+                    if (h3) h3.appendChild(distBadge);
+                }
+                const distanceLabel =
+                    item.distance !== Infinity
+                        ? `約 ${item.distance.toFixed(2)} km`
+                        : "位置不明";
+                if (distBadge.innerText !== distanceLabel) {
+                    distBadge.innerText = distanceLabel;
+                }
             }
         });
         return true;
@@ -283,47 +299,19 @@
     function loadDraftCoordinates(data) {
         if (data && data.result && Array.isArray(data.result.result)) {
             data.result.result.forEach((item) => {
-                if (
-                    item.id &&
-                    item.lat !== undefined &&
-                    item.lng !== undefined
-                ) {
-                    draftCoordsMap.set(item.id, {
-                        lat: item.lat,
-                        lng: item.lng,
-                    });
-                }
                 if (item.id) {
-                    draftReadinessMap.set(
-                        item.id,
-                        Boolean(
-                            (item.mainImageGcsPath ||
-                                item.mainImageServingUrl) &&
-                                ((item.supportingImageGcsPaths &&
-                                    item.supportingImageGcsPaths.length > 0) ||
-                                    (item.supportingImageServingUrls &&
-                                        item.supportingImageServingUrls.length >
-                                            0)) &&
-                                typeof item.title === "string" &&
-                                item.title.trim().length > 0 &&
-                                typeof item.description === "string" &&
-                                item.description.trim().length > 0
-                        )
-                    );
+                    draftMap.set(item.id, item);
                 }
             });
             if (
                 draftFilterState !== "all" ||
-                (draftSortState.sorted &&
+                (draftSortState.sortMode !== "unsorted" &&
                     draftSortState.latitude !== undefined &&
                     draftSortState.longitude !== undefined)
             ) {
                 scheduleDraftStateApply();
             }
-            console.log(
-                "[Wayfarer Draft Sorter] Coordinates loaded:",
-                draftCoordsMap
-            );
+            console.log("[Wayfarer Draft Sorter] Drafts loaded:", draftMap);
         }
     }
 
@@ -490,7 +478,7 @@
             return context[23].id;
         }
 
-        for (const id of draftCoordsMap.keys()) {
+        for (const id of draftMap.keys()) {
             /** @type {InvestigationMatch[]} */
             const matches = [];
             /** @type {WeakSet<object>} */
@@ -510,7 +498,7 @@
     }
 
     async function investigateDraftIds() {
-        const ids = Array.from(draftCoordsMap.keys());
+        const ids = Array.from(draftMap.keys());
         /** @type {InvestigationResult[]} */
         const results = ids.map((id) => ({ id, matches: [] }));
         /** @type {Map<string, InvestigationResult>} */
@@ -608,8 +596,20 @@
     function applyDraftFilter() {
         document.querySelectorAll("h3").forEach((h3) => {
             const draftId = getDraftIdForCard(h3);
-            const readiness = draftId
-                ? draftReadinessMap.get(draftId)
+            const draft = draftId ? draftMap.get(draftId) : undefined;
+            const readiness = draft
+                ? Boolean(
+                      (draft.mainImageGcsPath || draft.mainImageServingUrl) &&
+                          ((draft.supportingImageGcsPaths &&
+                              draft.supportingImageGcsPaths.length > 0) ||
+                              (draft.supportingImageServingUrls &&
+                                  draft.supportingImageServingUrls.length >
+                                      0)) &&
+                          typeof draft.title === "string" &&
+                          draft.title.trim().length > 0 &&
+                          typeof draft.description === "string" &&
+                          draft.description.trim().length > 0
+                  )
                 : undefined;
             const cardContainer = getDraftCardContainer(h3);
 
@@ -627,7 +627,13 @@
     function getDraftFilterLabel() {
         if (draftFilterState === "ready") return "準備完了";
         if (draftFilterState === "not-ready") return "不備";
-        return "全て";
+        return "絞り込まない";
+    }
+
+    function getSortModeLabel() {
+        if (draftSortState.sortMode === "distance") return "距離順";
+        if (draftSortState.sortMode === "last-modified") return "最終更新順";
+        return "未ソート";
     }
 
     // ソートボタンの追加と実行処理
@@ -644,7 +650,7 @@
 
         const btn = document.createElement("button");
         btn.id = "sort-drafts-btn";
-        btn.innerText = "距離順に並べ替え";
+        btn.innerText = `並び順: ${getSortModeLabel()}`;
         btn.style.cssText =
             "margin-left: 15px; padding: 6px 12px; cursor: pointer; background-color: #f53d00; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
 
@@ -670,7 +676,7 @@
         filterBtn.style.cssText =
             "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #1976d2; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(filterBtn);
-        if (draftSortState.sorted) checkCurrentLocation(btn);
+        if (draftSortState.sortMode === "distance") checkCurrentLocation(btn);
         filterBtn.addEventListener("click", () => {
             draftFilterState =
                 draftFilterState === "all"
@@ -685,6 +691,27 @@
         });
 
         btn.addEventListener("click", () => {
+            if (draftSortState.sortMode === "distance") {
+                sortDraftCards(0, 0, "last-modified");
+                draftSortState = {
+                    ...draftSortState,
+                    sortMode: "last-modified",
+                };
+                saveDraftState();
+                btn.innerText = `並び順: ${getSortModeLabel()}`;
+                return;
+            }
+
+            if (draftSortState.sortMode === "last-modified") {
+                draftSortState = {
+                    ...draftSortState,
+                    sortMode: "unsorted",
+                };
+                saveDraftState();
+                btn.innerText = `並び順: ${getSortModeLabel()}`;
+                return;
+            }
+
             btn.innerText = "位置情報を取得中...";
             btn.disabled = true;
 
@@ -692,32 +719,31 @@
                 (pos) => {
                     const userLat = pos.coords.latitude;
                     const userLon = pos.coords.longitude;
-                    if (!sortDraftCards(userLat, userLon)) {
+                    if (!sortDraftCards(userLat, userLon, "distance")) {
                         alert(
                             "ソート対象の下書きが見つかりませんでした。ページを更新して再試行してください。"
                         );
-                        btn.innerText = "距離順に並べ替え";
+                        btn.innerText = `並び順: ${getSortModeLabel()}`;
                         btn.disabled = false;
                         return;
                     }
 
                     draftSortState = {
                         ...draftSortState,
-                        sorted: true,
+                        sortMode: "distance",
                         latitude: userLat,
                         longitude: userLon,
                     };
                     saveDraftState();
 
-                    btn.innerText = "✅ ソート完了";
-                    setTimeout(() => {
-                        checkCurrentLocation(btn);
-                        btn.disabled = false;
-                    }, 2500);
+                    btn.innerText = `並び順: 距離順（基準地点から約 ${formatDistance(
+                        0
+                    )}）`;
+                    btn.disabled = false;
                 },
                 (err) => {
                     alert("位置情報の取得に失敗しました: " + err.message);
-                    btn.innerText = "📍 現在地からの距離順に並び替え";
+                    btn.innerText = `並び順: ${getSortModeLabel()}`;
                     btn.disabled = false;
                 }
             );
@@ -729,7 +755,7 @@
         addSortButton();
         if (
             draftFilterState !== "all" ||
-            (draftSortState.sorted &&
+            (draftSortState.sortMode !== "unsorted" &&
                 draftSortState.latitude !== undefined &&
                 draftSortState.longitude !== undefined)
         ) {
