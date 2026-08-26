@@ -52,7 +52,8 @@
      * @property {boolean} captcha 例: false
      */
 
-    // APIから取得した下書きデータを保持するマップ (id または title -> {lat, lng})
+    // APIから取得した下書きデータを保持するマップ (id -> {lat, lng})
+    /** @type {Map<string, DraftCoordinates>} */
     const draftCoordsMap = new Map();
 
     // 2点間の直線距離（km）を計算する関数（Haversine formula）
@@ -86,20 +87,35 @@
     }
 
     /**
+     * @typedef {{type?: string, path: string, value: string}} InvestigationMatch
+     */
+
+    /**
+     * @typedef {{lat: number, lng: number}} DraftCoordinates
+     */
+    /**
+     * @template T
+     * @typedef {T & { readonly __ngContext__?: unknown }} WithContext
+     */
+
+    /**
+     * @typedef {{id: string, matches: InvestigationMatch[]}} InvestigationResult
+     */
+
+    /**
      * @param {DraftsResponse} data
      */
     function loadDraftCoordinates(data) {
         if (data && data.result && Array.isArray(data.result.result)) {
             data.result.result.forEach((item) => {
                 if (
-                    item.title &&
+                    item.id &&
                     item.lat !== undefined &&
                     item.lng !== undefined
                 ) {
-                    draftCoordsMap.set(item.title.trim(), {
+                    draftCoordsMap.set(item.id, {
                         lat: item.lat,
                         lng: item.lng,
-                        id: item.id,
                     });
                 }
             });
@@ -140,6 +156,7 @@
     };
 
     // XMLHttpRequestをフックして、fetchを使わないAPIリクエストも処理
+    /** @type {WeakMap<XMLHttpRequest, string>} */
     const xhrUrls = new WeakMap();
     const originalXhrOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (/** @type {any} */ ...args) {
@@ -170,6 +187,202 @@
         return originalXhrSend.apply(this, args);
     };
 
+    /**
+     * @param {Element} element
+     */
+    function getElementPath(element) {
+        /** @type {string[]} */
+        const parts = [];
+        /** @type {Element | null} */
+        let current = element;
+        while (current && current.nodeType === Node.ELEMENT_NODE) {
+            let part = current.tagName.toLowerCase();
+            if (current.id) part += `#${current.id}`;
+            if (current.classList.length > 0) {
+                part += `.${Array.from(current.classList)
+                    .slice(0, 2)
+                    .join(".")}`;
+            }
+            parts.unshift(part);
+            current = current.parentElement;
+        }
+        return parts.join(" > ");
+    }
+
+    /**
+     * @param {unknown} value
+     * @param {string} path
+     * @param {string} id
+     * @param {InvestigationMatch[]} matches
+     * @param {WeakSet<object>} visited
+     * @param {{nodes: number}} state
+     * @param {number} depth
+     */
+    function inspectValue(value, path, id, matches, visited, state, depth) {
+        if (state.nodes >= 50000 || depth > 8 || value == null) return;
+
+        if (typeof value === "string") {
+            if (value === id) {
+                matches.push({ path, value: value.slice(0, 500) });
+            }
+            return;
+        }
+        if (typeof value !== "object" && typeof value !== "function") return;
+        if (visited.has(value)) return;
+
+        visited.add(value);
+        state.nodes++;
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => {
+                inspectValue(
+                    item,
+                    `${path}[${index}]`,
+                    id,
+                    matches,
+                    visited,
+                    state,
+                    depth + 1
+                );
+            });
+            return;
+        }
+
+        Object.keys(value).forEach((key) => {
+            let child;
+            try {
+                child = /** @type {Record<string, unknown>} */ (value)[key];
+            } catch (e) {
+                return;
+            }
+            inspectValue(
+                child,
+                `${path}.${key}`,
+                id,
+                matches,
+                visited,
+                state,
+                depth + 1
+            );
+        });
+    }
+
+    /**
+     * @param {Element} element
+     * @returns {string | undefined}
+     */
+    function getDraftIdForCard(element) {
+        const card = element.closest("app-submission-card");
+        if (!card) return undefined;
+
+        const context = /** @type {WithContext<typeof card>} */ (card)
+            .__ngContext__;
+        if (!context) return undefined;
+
+        if (
+            typeof context === "object" &&
+            "23" in context &&
+            typeof context[23] === "object" &&
+            context[23] != null &&
+            "id" in context[23] &&
+            typeof context[23].id === "string"
+        ) {
+            return context[23].id;
+        }
+
+        for (const id of draftCoordsMap.keys()) {
+            /** @type {InvestigationMatch[]} */
+            const matches = [];
+            /** @type {WeakSet<object>} */
+            const visited = new WeakSet();
+            inspectValue(
+                context,
+                "__ngContext__",
+                id,
+                matches,
+                visited,
+                { nodes: 0 },
+                0
+            );
+            if (matches.length > 0) return id;
+        }
+        return undefined;
+    }
+
+    async function investigateDraftIds() {
+        const ids = Array.from(draftCoordsMap.keys());
+        /** @type {InvestigationResult[]} */
+        const results = ids.map((id) => ({ id, matches: [] }));
+        /** @type {Map<string, InvestigationResult>} */
+        const resultById = new Map(
+            results.map((result) => [result.id, result])
+        );
+        const elements = Array.from(document.querySelectorAll("*"));
+
+        elements.forEach((element) => {
+            const elementPath = getElementPath(element);
+            const attributes = Array.from(element.attributes);
+            ids.forEach((id) => {
+                const result = resultById.get(id);
+                if (!result) return;
+
+                attributes.forEach((attribute) => {
+                    if (attribute.value === id) {
+                        result.matches.push({
+                            type: "attribute",
+                            path: `${elementPath}[@${attribute.name}]`,
+                            value: attribute.value.slice(0, 500),
+                        });
+                    }
+                });
+                if (element.textContent === id) {
+                    result.matches.push({
+                        type: "textContent",
+                        path: elementPath,
+                        value: element.textContent.trim().slice(0, 500),
+                    });
+                }
+                const elementWithContext =
+                    /** @type {WithContext<typeof element>} */ (element);
+                if (elementWithContext.__ngContext__) {
+                    /** @type {WeakSet<object>} */
+                    const visited = new WeakSet();
+                    inspectValue(
+                        elementWithContext.__ngContext__,
+                        `${elementPath}.__ngContext__`,
+                        id,
+                        result.matches,
+                        visited,
+                        { nodes: 0 },
+                        0
+                    );
+                }
+            });
+        });
+
+        const report = {
+            generatedAt: new Date().toISOString(),
+            apiIds: ids,
+            scannedElements: elements.length,
+            results,
+        };
+        const reportText = JSON.stringify(report, null, 2);
+        try {
+            await navigator.clipboard.writeText(reportText);
+            alert("ID調査結果をクリップボードにコピーしました。");
+        } catch (e) {
+            const textarea = document.createElement("textarea");
+            textarea.value = reportText;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+            alert("ID調査結果をクリップボードにコピーしました。");
+        }
+        console.log("[Wayfarer Draft Sorter] ID investigation:", report);
+    }
+
     // ソートボタンの追加と実行処理
     function addSortButton() {
         if (document.getElementById("sort-drafts-btn")) return;
@@ -190,6 +403,20 @@
 
         draftHeader.appendChild(btn);
 
+        const inspectBtn = document.createElement("button");
+        inspectBtn.id = "inspect-draft-ids-btn";
+        inspectBtn.innerText = "🔎 ID調査結果をコピー";
+        inspectBtn.style.cssText =
+            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #444; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
+        draftHeader.appendChild(inspectBtn);
+        inspectBtn.addEventListener("click", async () => {
+            inspectBtn.disabled = true;
+            inspectBtn.innerText = "調査中...";
+            await investigateDraftIds();
+            inspectBtn.innerText = "🔎 ID調査結果をコピー";
+            inspectBtn.disabled = false;
+        });
+
         btn.addEventListener("click", () => {
             btn.innerText = "位置情報を取得中...";
             btn.disabled = true;
@@ -209,7 +436,10 @@
 
                     h3Elements.forEach((h3) => {
                         const title = h3.innerText.trim();
-                        const coords = draftCoordsMap.get(title);
+                        const draftId = getDraftIdForCard(h3);
+                        const coords = draftId
+                            ? draftCoordsMap.get(draftId)
+                            : undefined;
 
                         // h3の親方向へ遡って最も近いカードコンテナ要素を取得
                         /** @type {HTMLElement | null} */
