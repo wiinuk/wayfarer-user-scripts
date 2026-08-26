@@ -76,6 +76,7 @@
     };
     /** @type {number | null} */
     let draftStateApplyTimer = null;
+    let locationCheckInProgress = false;
 
     try {
         /** @type {DraftListState | null} */
@@ -99,6 +100,57 @@
         } catch (e) {
             console.warn("[Wayfarer Draft Sorter] Could not save state:", e);
         }
+    }
+
+    /**
+     * @param {number} distance
+     */
+    function formatDistance(distance) {
+        return distance < 1
+            ? `${Math.round(distance * 1000)} m`
+            : `${distance.toFixed(2)} km`;
+    }
+
+    /**
+     * @param {HTMLButtonElement} sortButton
+     */
+    function checkCurrentLocation(sortButton) {
+        if (
+            !draftSortState.sorted ||
+            draftSortState.latitude === undefined ||
+            draftSortState.longitude === undefined ||
+            locationCheckInProgress
+        ) {
+            return;
+        }
+
+        locationCheckInProgress = true;
+        sortButton.innerText = "距離順に並べ替え（現在地を確認中...）";
+        const sortLatitude = assertsNonNull(draftSortState.latitude);
+        const sortLongitude = assertsNonNull(draftSortState.longitude);
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                locationCheckInProgress = false;
+                const distance = getDistance(
+                    sortLatitude,
+                    sortLongitude,
+                    position.coords.latitude,
+                    position.coords.longitude
+                );
+                sortButton.innerText = `距離順に並べ替え（基準地点から約 ${formatDistance(
+                    distance
+                )}）`;
+            },
+            (error) => {
+                locationCheckInProgress = false;
+                sortButton.innerText =
+                    "距離順に並べ替え（現在地を取得できません）";
+                console.warn(
+                    "[Wayfarer Draft Sorter] Could not check current location:",
+                    error
+                );
+            }
+        );
     }
 
     function scheduleDraftStateApply() {
@@ -592,7 +644,7 @@
 
         const btn = document.createElement("button");
         btn.id = "sort-drafts-btn";
-        btn.innerText = "📍 現在地からの距離順に並び替え";
+        btn.innerText = "距離順に並べ替え";
         btn.style.cssText =
             "margin-left: 15px; padding: 6px 12px; cursor: pointer; background-color: #f53d00; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
 
@@ -618,6 +670,7 @@
         filterBtn.style.cssText =
             "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #1976d2; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(filterBtn);
+        if (draftSortState.sorted) checkCurrentLocation(btn);
         filterBtn.addEventListener("click", () => {
             draftFilterState =
                 draftFilterState === "all"
@@ -643,7 +696,7 @@
                         alert(
                             "ソート対象の下書きが見つかりませんでした。ページを更新して再試行してください。"
                         );
-                        btn.innerText = "📍 現在地からの距離順に並び替え";
+                        btn.innerText = "距離順に並べ替え";
                         btn.disabled = false;
                         return;
                     }
@@ -658,7 +711,7 @@
 
                     btn.innerText = "✅ ソート完了";
                     setTimeout(() => {
-                        btn.innerText = "📍 現在地からの距離順に並び替え";
+                        checkCurrentLocation(btn);
                         btn.disabled = false;
                     }, 2500);
                 },
