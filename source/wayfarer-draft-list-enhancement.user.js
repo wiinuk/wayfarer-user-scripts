@@ -219,30 +219,28 @@
      * @returns {boolean}
      */
     function sortDraftCards(userLat, userLon, sortMode) {
-        const h3Elements = Array.from(document.querySelectorAll("h3"));
+        const draftCards = Array.from(
+            document.querySelectorAll("app-submission-card")
+        );
         /** @type {{element: HTMLElement, title: string, distance: number, lastModified: number}[]} */
         const cardItems = [];
 
-        h3Elements.forEach((h3) => {
-            const title = h3.innerText.trim();
-            const draftId = getDraftIdForCard(h3);
+        draftCards.forEach((draftCard) => {
+            const draftId = getDraftIdForCard(draftCard);
             const draft = draftId ? draftMap.get(draftId) : undefined;
-            const cardContainer = getDraftCardContainer(h3);
-
-            if (cardContainer == null) return;
+            if (!draft) return;
 
             cardItems.push({
-                element: cardContainer,
-                title: title,
+                element: /** @type {HTMLElement} */ (draftCard),
+                title: draft.title,
                 distance:
                     sortMode === "distance" &&
-                    draft &&
                     draft.lat !== undefined &&
                     draft.lng !== undefined
                         ? getDistance(userLat, userLon, draft.lat, draft.lng)
                         : Infinity,
                 lastModified:
-                    draft && typeof draft.lastModified === "number"
+                    typeof draft.lastModified === "number"
                         ? draft.lastModified
                         : Infinity,
             });
@@ -467,56 +465,38 @@
         return undefined;
     }
 
-    /**
-     * @param {Element} element
-     * @returns {HTMLElement | null}
-     */
-    function getDraftCardContainer(element) {
-        /** @type {HTMLElement | null} */
-        let cardContainer =
-            element.closest('div[class*="card"], div[class*="item"]') ||
-            element.parentElement;
-
-        if (cardContainer == null) return null;
-
-        while (
-            cardContainer.parentElement &&
-            cardContainer.parentElement.children.length < 2
-        ) {
-            cardContainer = cardContainer.parentElement;
-        }
-        return cardContainer;
-    }
-
     function applyDraftFilter() {
-        document.querySelectorAll("h3").forEach((h3) => {
-            const draftId = getDraftIdForCard(h3);
-            const draft = draftId ? draftMap.get(draftId) : undefined;
-            const readiness = draft
-                ? Boolean(
-                      (draft.mainImageGcsPath || draft.mainImageServingUrl) &&
-                          ((draft.supportingImageGcsPaths &&
-                              draft.supportingImageGcsPaths.length > 0) ||
-                              (draft.supportingImageServingUrls &&
-                                  draft.supportingImageServingUrls.length >
-                                      0)) &&
-                          typeof draft.title === "string" &&
-                          draft.title.trim().length > 0 &&
-                          typeof draft.description === "string" &&
-                          draft.description.trim().length > 0
-                  )
-                : undefined;
-            const cardContainer = getDraftCardContainer(h3);
+        document
+            .querySelectorAll("app-submission-card")
+            .forEach((draftCard) => {
+                const card = /** @type {HTMLElement} */ (draftCard);
+                const draftId = getDraftIdForCard(draftCard);
+                const draft = draftId ? draftMap.get(draftId) : undefined;
+                const readiness = draft
+                    ? Boolean(
+                          (draft.mainImageGcsPath ||
+                              draft.mainImageServingUrl) &&
+                              ((draft.supportingImageGcsPaths &&
+                                  draft.supportingImageGcsPaths.length > 0) ||
+                                  (draft.supportingImageServingUrls &&
+                                      draft.supportingImageServingUrls.length >
+                                          0)) &&
+                              typeof draft.title === "string" &&
+                              draft.title.trim().length > 0 &&
+                              typeof draft.description === "string" &&
+                              draft.description.trim().length > 0
+                      )
+                    : undefined;
 
-            if (cardContainer == null || readiness === undefined) return;
+                if (readiness === undefined) return;
 
-            const shouldHide =
-                draftFilterState !== "all" &&
-                (draftFilterState === "ready") !== readiness;
-            if (cardContainer.hidden !== shouldHide) {
-                cardContainer.hidden = shouldHide;
-            }
-        });
+                const shouldHide =
+                    draftFilterState !== "all" &&
+                    (draftFilterState === "ready") !== readiness;
+                if (card.hidden !== shouldHide) {
+                    card.hidden = shouldHide;
+                }
+            });
     }
 
     function getDraftFilterLabel() {
