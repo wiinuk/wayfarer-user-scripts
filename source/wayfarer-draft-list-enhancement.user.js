@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Wayfarer Drafts Precise Sorter by Distance
+// @name         Wayfarer Drafts List Enhancement
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Sort Niantic Wayfarer drafts using precise coordinates from API response
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -59,15 +59,26 @@
     /** @type {'all' | 'ready' | 'not-ready'} */
     let draftFilterState = "all";
 
+    /** @type {'all' | 'attested' | 'not-attested'} */
+    let locationAttestedFilterState = "all";
+
     const draftStateStorageKey = "wayfarer-draft-list-state";
-    const draftStateVersion = "2";
+    const draftStateVersion = "3";
     /**
-     * @typedef {{version: "2", filter: 'all' | 'ready' | 'not-ready', sortMode: 'unsorted' | 'distance' | 'last-modified', latitude?: number, longitude?: number}} DraftListState
+     * @typedef {{
+     *   version: "3",
+     *   filter: 'all' | 'ready' | 'not-ready',
+     *   locationAttestedFilter: 'all' | 'attested' | 'not-attested',
+     *   sortMode: 'unsorted' | 'distance' | 'last-modified',
+     *   latitude?: number,
+     *   longitude?: number
+     * }} DraftListState
      */
     /** @type {DraftListState} */
     let draftSortState = {
         version: draftStateVersion,
         filter: "all",
+        locationAttestedFilter: "all",
         sortMode: "unsorted",
     };
     /** @type {number | null} */
@@ -81,6 +92,8 @@
         );
         if (savedState && savedState.version === draftStateVersion) {
             draftFilterState = savedState.filter;
+            locationAttestedFilterState =
+                savedState.locationAttestedFilter || "all";
             draftSortState = savedState;
         }
     } catch (e) {
@@ -154,7 +167,7 @@
         }
         draftStateApplyTimer = window.setTimeout(() => {
             draftStateApplyTimer = null;
-            if (draftFilterState !== "all") applyDraftFilter();
+            applyDraftFilter();
             if (draftSortState.sortMode === "distance") {
                 if (
                     draftSortState.latitude === undefined ||
@@ -169,6 +182,8 @@
                 );
             } else if (draftSortState.sortMode === "last-modified") {
                 sortDraftCards(0, 0, "last-modified");
+            } else {
+                updateDraftCardBadges(0, 0, "unsorted");
             }
         }, 100);
     }
@@ -211,6 +226,69 @@
     /**
      * @typedef {{path: string, value: string}} ContextMatch
      */
+
+    /**
+     * @param {number} userLat
+     * @param {number} userLon
+     * @param {'distance' | 'last-modified' | 'unsorted'} sortMode
+     */
+    function updateDraftCardBadges(userLat, userLon, sortMode) {
+        const draftCards = Array.from(
+            document.querySelectorAll("app-submission-card")
+        );
+
+        draftCards.forEach((draftCard) => {
+            const draftId = getDraftIdForCard(draftCard);
+            const draft = draftId ? draftMap.get(draftId) : undefined;
+            if (!draft) return;
+
+            const h3 = draftCard.querySelector("h3");
+            if (!h3) return;
+
+            // locationAttested バッジの更新・表示
+            let locationBadge = /** @type {HTMLElement | null} */ (
+                draftCard.querySelector(".location-attested-badge")
+            );
+            if (!locationBadge) {
+                locationBadge = document.createElement("span");
+                locationBadge.className = "location-attested-badge";
+                h3.appendChild(locationBadge);
+            }
+
+            const isAttested = Boolean(draft.locationAttested);
+            locationBadge.style.cssText = `margin-left: 8px; font-size: 12px; font-weight: bold; padding: 2px 6px; border-radius: 4px; ${
+                isAttested
+                    ? "color: #2e7d32; background: #e8f5e9;"
+                    : "color: #c62828; background: #ffebee;"
+            }`;
+            locationBadge.innerText = isAttested ? "位置確認済" : "位置未確認";
+
+            // 距離バッジの更新・表示
+            if (sortMode === "distance") {
+                let distBadge = /** @type {HTMLElement | null} */ (
+                    draftCard.querySelector(".distance-badge")
+                );
+                if (!distBadge) {
+                    distBadge = document.createElement("span");
+                    distBadge.className = "distance-badge";
+                    distBadge.style.cssText =
+                        "margin-left: 8px; font-size: 12px; color: #f53d00; font-weight: bold; background: #ffebeb; padding: 2px 6px; border-radius: 4px;";
+                    h3.appendChild(distBadge);
+                }
+                const distance =
+                    draft.lat !== undefined && draft.lng !== undefined
+                        ? getDistance(userLat, userLon, draft.lat, draft.lng)
+                        : Infinity;
+                const distanceLabel =
+                    distance !== Infinity
+                        ? `約 ${distance.toFixed(2)} km`
+                        : "位置不明";
+                if (distBadge.innerText !== distanceLabel) {
+                    distBadge.innerText = distanceLabel;
+                }
+            }
+        });
+    }
 
     /**
      * @param {number} userLat
@@ -259,27 +337,9 @@
         );
         cardItems.forEach((item) => {
             if (needsReorder) parent.appendChild(item.element);
-
-            if (sortMode === "distance") {
-                /** @type {HTMLElement | null} */
-                let distBadge = item.element.querySelector(".distance-badge");
-                if (!distBadge) {
-                    distBadge = document.createElement("span");
-                    distBadge.className = "distance-badge";
-                    distBadge.style.cssText =
-                        "margin-left: 10px; font-size: 12px; color: #f53d00; font-weight: bold; background: #ffebeb; padding: 2px 6px; border-radius: 4px;";
-                    const h3 = item.element.querySelector("h3");
-                    if (h3) h3.appendChild(distBadge);
-                }
-                const distanceLabel =
-                    item.distance !== Infinity
-                        ? `約 ${item.distance.toFixed(2)} km`
-                        : "位置不明";
-                if (distBadge.innerText !== distanceLabel) {
-                    distBadge.innerText = distanceLabel;
-                }
-            }
         });
+
+        updateDraftCardBadges(userLat, userLon, sortMode);
         return true;
     }
 
@@ -293,14 +353,7 @@
                     draftMap.set(item.id, item);
                 }
             });
-            if (
-                draftFilterState !== "all" ||
-                (draftSortState.sortMode !== "unsorted" &&
-                    draftSortState.latitude !== undefined &&
-                    draftSortState.longitude !== undefined)
-            ) {
-                scheduleDraftStateApply();
-            }
+            scheduleDraftStateApply();
             console.log("[Wayfarer Draft Sorter] Drafts loaded:", draftMap);
         }
     }
@@ -318,7 +371,6 @@
 
         if (url && url.includes("/api/v1/vault/submit/get/drafts")) {
             try {
-                // レスポンスをクローンして解読
                 const clone = response.clone();
 
                 /** @type {DraftsResponse} */
@@ -472,27 +524,33 @@
                 const card = /** @type {HTMLElement} */ (draftCard);
                 const draftId = getDraftIdForCard(draftCard);
                 const draft = draftId ? draftMap.get(draftId) : undefined;
-                const readiness = draft
-                    ? Boolean(
-                          (draft.mainImageGcsPath ||
-                              draft.mainImageServingUrl) &&
-                              ((draft.supportingImageGcsPaths &&
-                                  draft.supportingImageGcsPaths.length > 0) ||
-                                  (draft.supportingImageServingUrls &&
-                                      draft.supportingImageServingUrls.length >
-                                          0)) &&
-                              typeof draft.title === "string" &&
-                              draft.title.trim().length > 0 &&
-                              typeof draft.description === "string" &&
-                              draft.description.trim().length > 0
-                      )
-                    : undefined;
+                if (!draft) return;
 
-                if (readiness === undefined) return;
+                // 1. 提出準備状態チェック
+                const readiness = Boolean(
+                    (draft.mainImageGcsPath || draft.mainImageServingUrl) &&
+                        ((draft.supportingImageGcsPaths &&
+                            draft.supportingImageGcsPaths.length > 0) ||
+                            (draft.supportingImageServingUrls &&
+                                draft.supportingImageServingUrls.length > 0)) &&
+                        typeof draft.title === "string" &&
+                        draft.title.trim().length > 0 &&
+                        typeof draft.description === "string" &&
+                        draft.description.trim().length > 0
+                );
 
-                const shouldHide =
+                const readinessHide =
                     draftFilterState !== "all" &&
                     (draftFilterState === "ready") !== readiness;
+
+                // 2. locationAttested チェック
+                const isAttested = Boolean(draft.locationAttested);
+                const locationAttestedHide =
+                    locationAttestedFilterState !== "all" &&
+                    (locationAttestedFilterState === "attested") !== isAttested;
+
+                const shouldHide = readinessHide || locationAttestedHide;
+
                 if (card.hidden !== shouldHide) {
                     card.hidden = shouldHide;
                 }
@@ -502,7 +560,13 @@
     function getDraftFilterLabel() {
         if (draftFilterState === "ready") return "準備完了";
         if (draftFilterState === "not-ready") return "不可";
-        return "";
+        return "すべて";
+    }
+
+    function getLocationAttestedFilterLabel() {
+        if (locationAttestedFilterState === "attested") return "確認済";
+        if (locationAttestedFilterState === "not-attested") return "未確認";
+        return "すべて";
     }
 
     function getSortModeLabel() {
@@ -512,11 +576,10 @@
         return "並び替えない";
     }
 
-    // ソートボタンの追加と実行処理
+    // ソート・フィルターボタンの追加
     function addSortButton() {
         if (document.getElementById("sort-drafts-btn")) return;
 
-        // 下書きヘッダー要素を検索
         const headers = Array.from(document.querySelectorAll("h2, h3"));
         const draftHeader = headers.find((el) =>
             el.textContent.includes("下書き")
@@ -524,21 +587,32 @@
 
         if (!draftHeader) return;
 
+        // ソートボタン
         const btn = document.createElement("button");
         btn.id = "sort-drafts-btn";
         btn.innerText = getSortModeLabel();
         btn.style.cssText =
             "margin-left: 15px; padding: 6px 12px; cursor: pointer; background-color: #f53d00; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
-
         draftHeader.appendChild(btn);
 
+        // 提出状態フィルターボタン
         const filterBtn = document.createElement("button");
         filterBtn.id = "filter-drafts-btn";
         filterBtn.innerText = `提出: ${getDraftFilterLabel()}`;
         filterBtn.style.cssText =
             "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #1976d2; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(filterBtn);
+
+        // locationAttested フィルターボタン
+        const locFilterBtn = document.createElement("button");
+        locFilterBtn.id = "filter-location-attested-btn";
+        locFilterBtn.innerText = `位置: ${getLocationAttestedFilterLabel()}`;
+        locFilterBtn.style.cssText =
+            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #388e3c; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
+        draftHeader.appendChild(locFilterBtn);
+
         if (draftSortState.sortMode === "distance") checkCurrentLocation(btn);
+
         filterBtn.addEventListener("click", () => {
             draftFilterState =
                 draftFilterState === "all"
@@ -549,6 +623,19 @@
             draftSortState.filter = draftFilterState;
             saveDraftState();
             filterBtn.innerText = `提出: ${getDraftFilterLabel()}`;
+            applyDraftFilter();
+        });
+
+        locFilterBtn.addEventListener("click", () => {
+            locationAttestedFilterState =
+                locationAttestedFilterState === "all"
+                    ? "attested"
+                    : locationAttestedFilterState === "attested"
+                    ? "not-attested"
+                    : "all";
+            draftSortState.locationAttestedFilter = locationAttestedFilterState;
+            saveDraftState();
+            locFilterBtn.innerText = `位置: ${getLocationAttestedFilterLabel()}`;
             applyDraftFilter();
         });
 
@@ -615,14 +702,7 @@
     // ページの動的描画に対応
     const observer = new MutationObserver(() => {
         addSortButton();
-        if (
-            draftFilterState !== "all" ||
-            (draftSortState.sortMode !== "unsorted" &&
-                draftSortState.latitude !== undefined &&
-                draftSortState.longitude !== undefined)
-        ) {
-            scheduleDraftStateApply();
-        }
+        scheduleDraftStateApply();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 })();
