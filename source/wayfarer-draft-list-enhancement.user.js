@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Drafts List Enhancement
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Sort Niantic Wayfarer drafts using precise coordinates from API response
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -256,12 +256,26 @@
             }
 
             const isAttested = Boolean(draft.locationAttested);
-            locationBadge.style.cssText = `margin-left: 8px; font-size: 12px; font-weight: bold; padding: 2px 6px; border-radius: 4px; ${
-                isAttested
-                    ? "color: #2e7d32; background: #e8f5e9;"
-                    : "color: #c62828; background: #ffebee;"
-            }`;
-            locationBadge.innerText = isAttested ? "位置確認済" : "位置未確認";
+
+            if (isAttested) {
+                locationBadge.style.cssText = `
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin-left: 8px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 50%;
+                    background: #2e7d32;
+                    color: white;
+                    font-size: 12px;
+                    font-weight: bold;
+                    vertical-align: middle;
+                `;
+                locationBadge.innerText = "✓";
+            } else {
+                locationBadge.style.display = "none";
+            }
 
             // 距離バッジの更新・表示
             if (sortMode === "distance") {
