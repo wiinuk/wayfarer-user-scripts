@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Drafts List Enhancement
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Sort Niantic Wayfarer drafts using precise coordinates from API response
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -10,6 +10,98 @@
 
 (function () {
     "use strict";
+
+    // -------------------------------------------------------------------------
+    // 1. クラス名・プレフィックスの設定とスタイルの定義
+    // -------------------------------------------------------------------------
+    const classNamePrefix = "wf";
+    const classNames = {
+        styleId: `${classNamePrefix}-enhancement-styles`,
+        btn: `${classNamePrefix}-btn`,
+        btnSort: `${classNamePrefix}-btn-sort`,
+        btnFilter: `${classNamePrefix}-btn-filter`,
+        btnLocation: `${classNamePrefix}-btn-location`,
+        locationBadge: `${classNamePrefix}-location-attested-badge`,
+        locationAttested: `${classNamePrefix}-location-attested`,
+        distanceBadge: `${classNamePrefix}-distance-badge`,
+    };
+
+    const globalStyles = `
+        /* ソート・フィルターボタンの基本スタイル */
+        .${classNames.btn} {
+            margin-left: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .${classNames.btnSort} {
+            margin-left: 15px;
+            background-color: #f53d00;
+        }
+
+        .${classNames.btnFilter} {
+            background-color: #1976d2;
+        }
+
+        .${classNames.btnLocation} {
+            background-color: #388e3c;
+        }
+
+        /* カード内バッジのスタイル */
+        .${classNames.locationBadge} {
+            display: none; /* デフォルトは非表示 */
+            align-items: center;
+            justify-content: center;
+            margin-left: 8px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #2e7d32;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+
+        /* 認証済みの場合のみ表示し、疑似要素でチェックマークを描画 */
+        .${classNames.locationBadge}.${classNames.locationAttested} {
+            display: inline-flex;
+        }
+
+        .${classNames.locationBadge}.${classNames.locationAttested}::before {
+            content: "✓";
+        }
+
+        .${classNames.distanceBadge} {
+            margin-left: 8px;
+            font-size: 12px;
+            color: #f53d00;
+            font-weight: bold;
+            background: #ffebeb;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+    `;
+
+    function injectStyles() {
+        if (document.getElementById(classNames.styleId)) return;
+        const styleElement = document.createElement("style");
+        styleElement.id = classNames.styleId;
+        styleElement.textContent = globalStyles;
+        (document.head || document.documentElement).appendChild(styleElement);
+    }
+
+    // スタイルを直ちに注入
+    injectStyles();
+
+    // -------------------------------------------------------------------------
+    // 2. 型定義・状態管理
+    // -------------------------------------------------------------------------
 
     /**
      * @typedef {Object} PoiItem
@@ -247,46 +339,28 @@
 
             // locationAttested バッジの更新・表示
             let locationBadge = /** @type {HTMLElement | null} */ (
-                draftCard.querySelector(".location-attested-badge")
+                draftCard.querySelector(`.${classNames.locationBadge}`)
             );
             if (!locationBadge) {
                 locationBadge = document.createElement("span");
-                locationBadge.className = "location-attested-badge";
+                locationBadge.className = classNames.locationBadge;
                 h3.appendChild(locationBadge);
             }
 
             const isAttested = Boolean(draft.locationAttested);
-
-            if (isAttested) {
-                locationBadge.style.cssText = `
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin-left: 8px;
-                    width: 18px;
-                    height: 18px;
-                    border-radius: 50%;
-                    background: #2e7d32;
-                    color: white;
-                    font-size: 12px;
-                    font-weight: bold;
-                    vertical-align: middle;
-                `;
-                locationBadge.innerText = "✓";
-            } else {
-                locationBadge.style.display = "none";
-            }
+            locationBadge.classList.toggle(
+                classNames.locationAttested,
+                isAttested
+            );
 
             // 距離バッジの更新・表示
             if (sortMode === "distance") {
                 let distBadge = /** @type {HTMLElement | null} */ (
-                    draftCard.querySelector(".distance-badge")
+                    draftCard.querySelector(`.${classNames.distanceBadge}`)
                 );
                 if (!distBadge) {
                     distBadge = document.createElement("span");
-                    distBadge.className = "distance-badge";
-                    distBadge.style.cssText =
-                        "margin-left: 8px; font-size: 12px; color: #f53d00; font-weight: bold; background: #ffebeb; padding: 2px 6px; border-radius: 4px;";
+                    distBadge.className = classNames.distanceBadge;
                     h3.appendChild(distBadge);
                 }
                 const distance =
@@ -604,25 +678,22 @@
         // ソートボタン
         const btn = document.createElement("button");
         btn.id = "sort-drafts-btn";
+        btn.classList.add(classNames.btn, classNames.btnSort);
         btn.innerText = getSortModeLabel();
-        btn.style.cssText =
-            "margin-left: 15px; padding: 6px 12px; cursor: pointer; background-color: #f53d00; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(btn);
 
         // 提出状態フィルターボタン
         const filterBtn = document.createElement("button");
         filterBtn.id = "filter-drafts-btn";
+        filterBtn.classList.add(classNames.btn, classNames.btnFilter);
         filterBtn.innerText = `提出: ${getDraftFilterLabel()}`;
-        filterBtn.style.cssText =
-            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #1976d2; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(filterBtn);
 
         // locationAttested フィルターボタン
         const locFilterBtn = document.createElement("button");
         locFilterBtn.id = "filter-location-attested-btn";
+        locFilterBtn.classList.add(classNames.btn, classNames.btnLocation);
         locFilterBtn.innerText = `位置: ${getLocationAttestedFilterLabel()}`;
-        locFilterBtn.style.cssText =
-            "margin-left: 8px; padding: 6px 12px; cursor: pointer; background-color: #388e3c; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;";
         draftHeader.appendChild(locFilterBtn);
 
         if (draftSortState.sortMode === "distance") checkCurrentLocation(btn);
@@ -715,6 +786,7 @@
 
     // ページの動的描画に対応
     const observer = new MutationObserver(() => {
+        injectStyles();
         addSortButton();
         scheduleDraftStateApply();
     });
