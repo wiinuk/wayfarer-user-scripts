@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.15
+// @version      1.15.1
 // @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。座標変更時のトースト通知。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -355,19 +355,30 @@
     let lastObservedCoord = "";
     /** @type {MutationObserver | null} */
     let coordObserver = null;
+    /** @type {Element | null} */
+    let observedElement = null;
 
     function setupCoordObserver() {
         const targetElement = document.querySelector(
             ".submit-coordinates-text"
         );
+
+        // 要素が存在しない場合は何もしない
         if (!targetElement) return;
 
-        // 初期値の保持
-        if (!lastObservedCoord) {
-            lastObservedCoord = (targetElement.textContent || "").trim();
+        // 既に同じDOM要素を監視中の場合はスキップ
+        if (coordObserver && observedElement === targetElement) return;
+
+        // 要素が再生成（または初回取得）された場合、既存のObserverを解除
+        if (coordObserver) {
+            coordObserver.disconnect();
         }
 
-        if (coordObserver) return; // 既に監視中の場合はスキップ
+        // 監視対象要素を保持
+        observedElement = targetElement;
+
+        // 初期値の保持
+        lastObservedCoord = (targetElement.textContent || "").trim();
 
         coordObserver = new MutationObserver(() => {
             const currentCoord = (targetElement.textContent || "").trim();
