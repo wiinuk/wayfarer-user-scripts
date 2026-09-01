@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.12
+// @version      1.14
 // @description  手動で申請座標入力。URLハッシュからの自動入力。誤操作防止用マップシールド。意図しない自動ピン設定の通知。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -103,7 +103,7 @@
     /**
      * @typedef {object} SubmitMapComponentBase
      * @property {BaseMapDetail} [baseMap]
-     * @property {unknown} [selectedLocation]
+     * @property {LatLng} [selectedLocation]
      * @property {boolean} [isMobileMode]
      * @property {ObservableProperty} [locationSelected]
      * @property {unknown} [map]
@@ -265,9 +265,6 @@
         return null;
     }
 
-    /**
-     * マップのドラッグ手動操作のみを監視（自動Bounds変更は無視）
-     */
     const monitoredMaps = new WeakSet();
     /**
      * @param {GoogleMap} nativeMap
@@ -277,8 +274,8 @@
         monitoredMaps.add(nativeMap);
 
         if (typeof nativeMap.addListener === "function") {
-            // ユーザーによる明確なドラッグ開始のみ取得
             nativeMap.addListener("dragstart", markUserAction);
+            nativeMap.addListener("click", markUserAction);
         }
     }
 
@@ -296,7 +293,7 @@
      * @param {number} lng
      */
     function setPinCoordinate(lat, lng) {
-        markUserAction(); // ユーザー操作（または自動補正操作）として記録
+        markUserAction(); // ユーザー操作として記録
 
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             throw new Error("有効な数値の緯度・経度を入力してください。");
@@ -424,48 +421,93 @@
         toast.appendChild(closeButton);
         document.body.appendChild(toast);
 
-        // アニメーション表示
         requestAnimationFrame(() => {
             toast.style.opacity = "1";
             toast.style.transform = "translateY(0)";
         });
     }
 
-    // --- 自動設定の監視機能 ---
+    // --- 座標変更検知コアロジック ---
+
+    /** @type {LatLng | null} */
+    let lastKnownLocation = null;
+
+    /**
+     * @param {LatLng} loc
+     */
+    function handleLocationUpdate(loc) {
+        if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number")
+            return;
+
+        const isSameAsLast =
+            lastKnownLocation &&
+            Math.abs(lastKnownLocation.lat - loc.lat) < 1e-7 &&
+            Math.abs(lastKnownLocation.lng - loc.lng) < 1e-7;
+
+        if (isSameAsLast) {
+            return; // 同一座標の連打・初期重複イベントは無視
+        }
+
+        // 初回記録
+        if (!lastKnownLocation) {
+            lastKnownLocation = loc;
+            return;
+        }
+
+        lastKnownLocation = loc;
+
+        // ユーザー操作以外での更新時に通知
+        if (!isUserAction) {
+            showAutoLocationToast(loc);
+        }
+    }
 
     const subscribedComponents = new WeakSet();
 
     function watchAutoLocationChange() {
         const comp = findRawSubmitComponent();
-        if (comp) {
-            const nativeMap = resolveMapFromComponent(comp);
-            if (nativeMap) {
-                bindMapUserActionEvents(nativeMap);
-            }
+        if (!comp) return;
+
+        const nativeMap = resolveMapFromComponent(comp);
+        if (nativeMap) {
+            bindMapUserActionEvents(nativeMap);
         }
 
-        if (comp && comp.locationSelected && !subscribedComponents.has(comp)) {
+        if (!subscribedComponents.has(comp)) {
             subscribedComponents.add(comp);
 
-            // ページ初期化時の1回目の発火（初期値設定）を無視するためのフラグ
-            let isInitialEvent = true;
+            // 初期位置の記録
+            if (comp.selectedLocation) {
+                handleLocationUpdate(comp.selectedLocation);
+            }
 
-            comp.locationSelected.subscribe((loc) => {
-                // 初期ロード時発火はスキップ
-                if (isInitialEvent) {
-                    isInitialEvent = false;
-                    return;
-                }
+            // 1. Observable 監視 (スマホ版・一部イベント用)
+            if (
+                comp.locationSelected &&
+                typeof comp.locationSelected.subscribe === "function"
+            ) {
+                comp.locationSelected.subscribe((loc) => {
+                    handleLocationUpdate(loc);
+                });
+            }
 
-                // 物理的なユーザー操作が行われていない自動読み込み等の場合のみ通知
-                if (!isUserAction) {
-                    showAutoLocationToast(loc);
-                }
+            // 2. selectedLocation setter 横取り (PC版・直接代入対策)
+            let val = comp.selectedLocation;
+            Object.defineProperty(comp, "selectedLocation", {
+                get() {
+                    return val;
+                },
+                set(newVal) {
+                    val = newVal;
+                    handleLocationUpdate(newVal);
+                },
+                configurable: true,
+                enumerable: true,
             });
         }
     }
 
-    // --- 読み込み待ちガード（オーバーレイ & バナー）UI ---
+    // --- 読み込み待ちガード UI ---
 
     function showLoadingGuard() {
         if (document.getElementById("custom-loading-guard-overlay")) return;
@@ -511,7 +553,7 @@
         }
     }
 
-    // --- マップ操作誤作動防止用オーバーレイ（シールド）機能 ---
+    // --- マップ操作誤作動防止用シールド機能 ---
 
     /**
      * @param {HTMLElement} mapContainer
@@ -604,43 +646,43 @@
         const container = document.createElement("div");
         container.id = "custom-coord-input-container";
         container.style.cssText = `
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-      background: rgba(255, 255, 255, 0.95);
-      padding: 8px 12px;
-      border-radius: 6px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      font-family: sans-serif;
-    `;
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px 12px;
+            border-radius: 6px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            font-family: sans-serif;
+        `;
 
         const input = document.createElement("input");
         input.id = "custom-coord-input-field";
         input.type = "text";
         input.placeholder = "35.6812, 139.7671";
         input.style.cssText = `
-      width: 180px;
-      padding: 4px 8px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-size: 13px;
-    `;
+            width: 180px;
+            padding: 4px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+        `;
 
         const button = document.createElement("button");
         button.textContent = "移動";
         button.style.cssText = `
-      padding: 4px 10px;
-      background: #007bff;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-    `;
+            padding: 4px 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        `;
 
         const applyCoordinate = () => {
             markUserAction();
@@ -677,7 +719,6 @@
             }
         });
 
-        // 実際の物理入力（マウス・タッチ・ホイール操作）のみを「ユーザー操作」と判定
         const userEvents = [
             "pointerdown",
             "click",
@@ -746,7 +787,7 @@
                     }
                 } catch (e) {
                     console.warn("座標の設定を再試行します", e);
-                    return; // マップ読み込み完了まで待機し、次のDOM変更監視で再試行
+                    return;
                 }
             }
 
