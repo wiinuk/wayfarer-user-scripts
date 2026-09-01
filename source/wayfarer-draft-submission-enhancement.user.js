@@ -19,6 +19,14 @@
      */
 
     /**
+     * @template T
+     * @param {T} value
+     */
+    function assertsNonNull(value) {
+        return /** @type {NonNullable<T>} */ (value);
+    }
+
+    /**
      * @typedef {object} GoogleMap
      * @property {UnknownFunction} getCenter
      * @property {UnknownFunction} addListener
@@ -112,7 +120,7 @@
             value.locationSelected &&
             typeof value.locationSelected === "object" &&
             "subscribe" in value.locationSelected &&
-            typeof value?.locationSelected?.subscribe === "function"
+            typeof value.locationSelected.subscribe === "function"
         );
     }
 
@@ -145,16 +153,16 @@
         }
 
         if (value && typeof value === "object") {
-            add(value.__ngContext__);
-            add(value.__ngContext__?.[0]);
-            add(value.__ngContext__?.$implicit);
-            add(value.component);
-            add(value.componentRef);
-            add(value.baseMap);
-            add(value.niaMap);
-            add(value.selectedLocation);
-            add(value.locationSelected);
-            add(value.host);
+            add(value["__ngContext__"]);
+            add(value["__ngContext__"]?.[0]);
+            add(value["__ngContext__"]?.["$implicit"]);
+            add(value["component"]);
+            add(value["componentRef"]);
+            add(value["baseMap"]);
+            add(value["niaMap"]);
+            add(value["selectedLocation"]);
+            add(value["locationSelected"]);
+            add(value["host"]);
         }
 
         return items;
@@ -167,8 +175,8 @@
 
         if (root) {
             candidates.push(root);
-            candidates.push(root.__ngContext__);
-            const ngContext = root.__ngContext__;
+            candidates.push(root["__ngContext__"]);
+            const ngContext = root["__ngContext__"];
             if (Array.isArray(ngContext)) {
                 candidates.push(...ngContext);
             }
@@ -177,9 +185,9 @@
                 const element =
                     /** @type {Element & PageComponentProperties} */ (e);
                 candidates.push(element);
-                candidates.push(element.__ngContext__);
-                if (Array.isArray(element.__ngContext__)) {
-                    candidates.push(...element.__ngContext__);
+                candidates.push(element["__ngContext__"]);
+                if (Array.isArray(element["__ngContext__"])) {
+                    candidates.push(...element["__ngContext__"]);
                 }
             }
         }
@@ -223,7 +231,7 @@
                     i
                 );
                 const candidateMap =
-                    item?.componentRef?.map || item?.map || null;
+                    item["componentRef"]?.["map"] || item["map"] || null;
                 if (looksLikeGoogleMap(candidateMap)) return candidateMap;
             }
         }
@@ -266,14 +274,14 @@
 
         if (submitComponent) {
             const nextLocation = { lat, lng };
-            if (typeof submitComponent?.onMapClick === "function") {
+            if (typeof submitComponent.onMapClick === "function") {
                 submitComponent.onMapClick(nextLocation);
                 return;
             }
 
             if (
-                typeof submitComponent?._updateMapSelection === "function" &&
-                typeof submitComponent?._applySelectedMarker === "function"
+                typeof submitComponent._updateMapSelection === "function" &&
+                typeof submitComponent._applySelectedMarker === "function"
             ) {
                 submitComponent._updateMapSelection(nextLocation);
                 submitComponent._applySelectedMarker();
@@ -281,7 +289,7 @@
             }
         }
 
-        if (nativeMap && googleMaps?.event) {
+        if (nativeMap && googleMaps.event) {
             googleMaps.event.trigger(nativeMap, "click", { latLng: target });
             return;
         }
@@ -342,9 +350,16 @@
             const value = input.value.trim();
             const parts = value.split(",").map((s) => parseFloat(s.trim()));
 
-            if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            if (
+                parts.length === 2 &&
+                !isNaN(assertsNonNull(parts[0])) &&
+                !isNaN(assertsNonNull(parts[1]))
+            ) {
                 try {
-                    setPinCoordinate(parts[0], parts[1]);
+                    setPinCoordinate(
+                        assertsNonNull(parts[0]),
+                        assertsNonNull(parts[1])
+                    );
                 } catch (err) {
                     alert(
                         "エラー: " +
