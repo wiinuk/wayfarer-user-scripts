@@ -1,16 +1,37 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.6
-// @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。
+// @version      1.12
+// @description  手動で申請座標入力。URLハッシュからの自動入力。誤操作防止用マップシールド。意図しない自動ピン設定の通知。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
 //@ts-check
-//spell-checker:words wayspot
+//spell-checker:words wayspot EXIF relock
 
 (function () {
     "use strict";
+
+    // --- ユーザー操作フラグ・監視管理 ---
+    let isUserAction = false;
+    let userActionTimeout = /** @type {number | null} */ (null);
+
+    /**
+     * ユーザーによる明示的な操作が発生したことを記録する関数
+     */
+    function markUserAction() {
+        isUserAction = true;
+        dismissAutoLocationToast(); // 手動操作が行われたら通知を消す
+
+        if (userActionTimeout !== null) {
+            clearTimeout(userActionTimeout);
+        }
+        // ズーム操作後の内部処理完了までの猶予時間
+        userActionTimeout = window.setTimeout(() => {
+            isUserAction = false;
+            userActionTimeout = null;
+        }, 1000);
+    }
 
     // --- 地図・コンポーネント解析処理 ---
 
@@ -27,9 +48,14 @@
     }
 
     /**
+     * @typedef {object} GoogleMapListener
+     * @property {() => void} remove
+     */
+
+    /**
      * @typedef {object} GoogleMap
      * @property {UnknownFunction} getCenter
-     * @property {UnknownFunction} addListener
+     * @property {(eventName: string, handler: Function) => GoogleMapListener} addListener
      * @property {UnknownFunction} getDiv
      * @property {(value: unknown) => void} setCenter
      * @property {() => number} getZoom
@@ -59,7 +85,7 @@
 
     /**
      * @typedef {object} ObservableProperty
-     * @property {UnknownFunction} subscribe
+     * @property {(listener: (value: LatLng) => unknown) => unknown} subscribe
      */
 
     /**
@@ -240,6 +266,23 @@
     }
 
     /**
+     * マップのドラッグ手動操作のみを監視（自動Bounds変更は無視）
+     */
+    const monitoredMaps = new WeakSet();
+    /**
+     * @param {GoogleMap} nativeMap
+     */
+    function bindMapUserActionEvents(nativeMap) {
+        if (!nativeMap || monitoredMaps.has(nativeMap)) return;
+        monitoredMaps.add(nativeMap);
+
+        if (typeof nativeMap.addListener === "function") {
+            // ユーザーによる明確なドラッグ開始のみ取得
+            nativeMap.addListener("dragstart", markUserAction);
+        }
+    }
+
+    /**
      * @typedef {object} GoogleMapsEventNamespace
      * @property {(map: GoogleMap, type: string, options: { latLng: LatLng }) => unknown} trigger
      */
@@ -253,6 +296,8 @@
      * @param {number} lng
      */
     function setPinCoordinate(lat, lng) {
+        markUserAction(); // ユーザー操作（または自動補正操作）として記録
+
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             throw new Error("有効な数値の緯度・経度を入力してください。");
         }
@@ -264,6 +309,10 @@
 
         const submitComponent = findRawSubmitComponent();
         const nativeMap = resolveMapFromComponent(submitComponent);
+        if (nativeMap) {
+            bindMapUserActionEvents(nativeMap);
+        }
+
         const target = new googleMaps.LatLng(lat, lng);
 
         if (nativeMap) {
@@ -295,6 +344,125 @@
         }
 
         throw new Error("コンポーネントまたはマップの取得に失敗しました。");
+    }
+
+    // --- トースト通知 UI 管理 ---
+
+    function dismissAutoLocationToast() {
+        const toast = document.getElementById("custom-auto-location-toast");
+        if (toast) {
+            toast.style.opacity = "0";
+            toast.style.transform = "translateY(10px)";
+            setTimeout(() => toast.remove(), 200);
+        }
+    }
+
+    /**
+     * @param {LatLng} loc
+     */
+    function showAutoLocationToast(loc) {
+        dismissAutoLocationToast(); // 既存の通知があれば閉じる
+
+        const toast = document.createElement("div");
+        toast.id = "custom-auto-location-toast";
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 999999;
+            background: #d9534f;
+            color: #ffffff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+            font-size: 13px;
+            line-height: 1.4;
+            max-width: 320px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            font-family: sans-serif;
+        `;
+
+        const coordsText =
+            loc && typeof loc.lat === "number" && typeof loc.lng === "number"
+                ? `<div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">（${loc.lat.toFixed(
+                      6
+                  )}, ${loc.lng.toFixed(6)}）</div>`
+                : "";
+
+        const content = document.createElement("div");
+        content.style.flex = "1";
+        content.innerHTML = `
+            <strong>⚠️ 位置情報の自動設定を検出</strong>
+            <div>座標が自動設定されました。意図した位置かご確認ください。</div>
+            ${coordsText}
+        `;
+
+        const closeButton = document.createElement("button");
+        closeButton.textContent = "✕";
+        closeButton.style.cssText = `
+            background: none;
+            border: none;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 0 2px;
+            line-height: 1;
+            opacity: 0.8;
+        `;
+        closeButton.addEventListener("click", (e) => {
+            e.stopPropagation();
+            dismissAutoLocationToast();
+        });
+
+        toast.appendChild(content);
+        toast.appendChild(closeButton);
+        document.body.appendChild(toast);
+
+        // アニメーション表示
+        requestAnimationFrame(() => {
+            toast.style.opacity = "1";
+            toast.style.transform = "translateY(0)";
+        });
+    }
+
+    // --- 自動設定の監視機能 ---
+
+    const subscribedComponents = new WeakSet();
+
+    function watchAutoLocationChange() {
+        const comp = findRawSubmitComponent();
+        if (comp) {
+            const nativeMap = resolveMapFromComponent(comp);
+            if (nativeMap) {
+                bindMapUserActionEvents(nativeMap);
+            }
+        }
+
+        if (comp && comp.locationSelected && !subscribedComponents.has(comp)) {
+            subscribedComponents.add(comp);
+
+            // ページ初期化時の1回目の発火（初期値設定）を無視するためのフラグ
+            let isInitialEvent = true;
+
+            comp.locationSelected.subscribe((loc) => {
+                // 初期ロード時発火はスキップ
+                if (isInitialEvent) {
+                    isInitialEvent = false;
+                    return;
+                }
+
+                // 物理的なユーザー操作が行われていない自動読み込み等の場合のみ通知
+                if (!isUserAction) {
+                    showAutoLocationToast(loc);
+                }
+            });
+        }
     }
 
     // --- 読み込み待ちガード（オーバーレイ & バナー）UI ---
@@ -389,10 +557,10 @@
         badge.innerHTML = "🔒 タップしてマップ操作を有効化";
         shield.appendChild(badge);
 
-        const relockBtn = document.createElement("button");
-        relockBtn.id = "custom-map-relock-btn";
-        relockBtn.textContent = "🔒 マップをロック";
-        relockBtn.style.cssText = `
+        const relockButton = document.createElement("button");
+        relockButton.id = "custom-map-relock-button";
+        relockButton.textContent = "🔒 マップをロック";
+        relockButton.style.cssText = `
             position: absolute;
             bottom: 12px;
             right: 12px;
@@ -408,19 +576,21 @@
         `;
 
         shield.addEventListener("click", (e) => {
+            markUserAction();
             e.stopPropagation();
             shield.style.display = "none";
-            relockBtn.style.display = "block";
+            relockButton.style.display = "block";
         });
 
-        relockBtn.addEventListener("click", (e) => {
+        relockButton.addEventListener("click", (e) => {
+            markUserAction();
             e.stopPropagation();
             shield.style.display = "flex";
-            relockBtn.style.display = "none";
+            relockButton.style.display = "none";
         });
 
         mapContainer.appendChild(shield);
-        mapContainer.appendChild(relockBtn);
+        mapContainer.appendChild(relockButton);
     }
 
     // --- 手動座標入力UI ---
@@ -460,9 +630,9 @@
       font-size: 13px;
     `;
 
-        const btn = document.createElement("button");
-        btn.textContent = "移動";
-        btn.style.cssText = `
+        const button = document.createElement("button");
+        button.textContent = "移動";
+        button.style.cssText = `
       padding: 4px 10px;
       background: #007bff;
       color: white;
@@ -473,6 +643,7 @@
     `;
 
         const applyCoordinate = () => {
+            markUserAction();
             const value = input.value.trim();
             const parts = value.split(",").map((s) => parseFloat(s.trim()));
 
@@ -497,7 +668,7 @@
             }
         };
 
-        btn.addEventListener("click", applyCoordinate);
+        button.addEventListener("click", applyCoordinate);
 
         input.addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
@@ -506,8 +677,24 @@
             }
         });
 
+        // 実際の物理入力（マウス・タッチ・ホイール操作）のみを「ユーザー操作」と判定
+        const userEvents = [
+            "pointerdown",
+            "click",
+            "wheel",
+            "touchstart",
+            "touchmove",
+            "dblclick",
+        ];
+        userEvents.forEach((evtName) => {
+            mapContainer.addEventListener(evtName, markUserAction, {
+                capture: true,
+                passive: true,
+            });
+        });
+
         container.appendChild(input);
-        container.appendChild(btn);
+        container.appendChild(button);
 
         if (getComputedStyle(mapContainer).position === "static") {
             mapContainer.style.position = "relative";
@@ -549,6 +736,7 @@
             // 座標反映
             if (typeof data.lat === "number" && typeof data.lng === "number") {
                 try {
+                    markUserAction();
                     setPinCoordinate(data.lat, data.lng);
                     const coordInput = /** @type {HTMLInputElement} */ (
                         document.getElementById("custom-coord-input-field")
@@ -598,6 +786,7 @@
         if (mapContainer) {
             setupMapShield(mapContainer);
             createInputUI(mapContainer);
+            watchAutoLocationChange();
         }
         processHashData();
     });
