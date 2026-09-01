@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.6
-// @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。
+// @version      1.15
+// @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。座標変更時のトースト通知。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -295,6 +295,93 @@
         }
 
         throw new Error("コンポーネントまたはマップの取得に失敗しました。");
+    }
+
+    // --- トースト通知機能 ---
+
+    /**
+     * 画面右下にトースト通知を表示する
+     * @param {string} message
+     */
+    function showToast(message) {
+        let container = document.getElementById("custom-toast-container");
+        if (!container) {
+            container = document.createElement("div");
+            container.id = "custom-toast-container";
+            container.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 100000;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+        }
+
+        const toast = document.createElement("div");
+        toast.style.cssText = `
+            background: rgba(220, 38, 38, 0.9);
+            color: #ffffff;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+            pointer-events: auto;
+        `;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        requestAnimationFrame(() => {
+            toast.style.opacity = "1";
+            toast.style.transform = "translateY(0)";
+        });
+
+        setTimeout(() => {
+            toast.style.opacity = "0";
+            toast.style.transform = "translateY(10px)";
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    }
+
+    // --- 座標変更の監視処理 ---
+
+    let lastObservedCoord = "";
+    /** @type {MutationObserver | null} */
+    let coordObserver = null;
+
+    function setupCoordObserver() {
+        const targetElement = document.querySelector(
+            ".submit-coordinates-text"
+        );
+        if (!targetElement) return;
+
+        // 初期値の保持
+        if (!lastObservedCoord) {
+            lastObservedCoord = (targetElement.textContent || "").trim();
+        }
+
+        if (coordObserver) return; // 既に監視中の場合はスキップ
+
+        coordObserver = new MutationObserver(() => {
+            const currentCoord = (targetElement.textContent || "").trim();
+            if (currentCoord && currentCoord !== lastObservedCoord) {
+                lastObservedCoord = currentCoord;
+                showToast(`📍 座標が更新されました:\n${currentCoord}`);
+            }
+        });
+
+        coordObserver.observe(targetElement, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+        });
     }
 
     // --- 読み込み待ちガード（オーバーレイ & バナー）UI ---
@@ -599,6 +686,7 @@
             setupMapShield(mapContainer);
             createInputUI(mapContainer);
         }
+        setupCoordObserver();
         processHashData();
     });
 
