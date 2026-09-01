@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.4
+// @version      1.5
 // @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -305,7 +305,6 @@
     function setupMapShield(mapContainer) {
         if (document.getElementById("custom-map-shield")) return;
 
-        // 親要素のポディショニング調整
         if (getComputedStyle(mapContainer).position === "static") {
             mapContainer.style.position = "relative";
         }
@@ -344,7 +343,6 @@
         badge.innerHTML = "🔒 タップしてマップ操作を有効化";
         shield.appendChild(badge);
 
-        // 再ロック用のボタン
         const relockBtn = document.createElement("button");
         relockBtn.id = "custom-map-relock-btn";
         relockBtn.textContent = "🔒 マップをロック";
@@ -363,14 +361,12 @@
             display: none;
         `;
 
-        // ロック解除
         shield.addEventListener("click", (e) => {
             e.stopPropagation();
             shield.style.display = "none";
             relockBtn.style.display = "block";
         });
 
-        // 再ロック
         relockBtn.addEventListener("click", (e) => {
             e.stopPropagation();
             shield.style.display = "flex";
@@ -419,7 +415,7 @@
     `;
 
         const btn = document.createElement("button");
-        btn.textContent = "ピン移動";
+        btn.textContent = "移動";
         btn.style.cssText = `
       padding: 4px 10px;
       background: #007bff;
@@ -430,7 +426,7 @@
       font-size: 13px;
     `;
 
-        btn.addEventListener("click", () => {
+        const applyCoordinate = () => {
             const value = input.value.trim();
             const parts = value.split(",").map((s) => parseFloat(s.trim()));
 
@@ -452,6 +448,15 @@
                 }
             } else {
                 alert("座標の形式が正しくありません。\n例: 35.6812, 139.7671");
+            }
+        };
+
+        btn.addEventListener("click", applyCoordinate);
+
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                applyCoordinate();
             }
         });
 
