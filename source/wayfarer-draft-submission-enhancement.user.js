@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.3
-// @description  申請座標を文字列で入力できるようにし、URLハッシュ(#data=JSON)からの自動入力に対応します。
+// @version      1.4
+// @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -297,6 +297,90 @@
         throw new Error("コンポーネントまたはマップの取得に失敗しました。");
     }
 
+    // --- マップ操作誤作動防止用オーバーレイ（シールド）機能 ---
+
+    /**
+     * @param {HTMLElement} mapContainer
+     */
+    function setupMapShield(mapContainer) {
+        if (document.getElementById("custom-map-shield")) return;
+
+        // 親要素のポディショニング調整
+        if (getComputedStyle(mapContainer).position === "static") {
+            mapContainer.style.position = "relative";
+        }
+
+        const shield = document.createElement("div");
+        shield.id = "custom-map-shield";
+        shield.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 999;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            backdrop-filter: blur(2px);
+            transition: opacity 0.2s ease;
+        `;
+
+        const badge = document.createElement("div");
+        badge.style.cssText = `
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            pointer-events: none;
+            user-select: none;
+        `;
+        badge.innerHTML = "🔒 タップしてマップ操作を有効化";
+        shield.appendChild(badge);
+
+        // 再ロック用のボタン
+        const relockBtn = document.createElement("button");
+        relockBtn.id = "custom-map-relock-btn";
+        relockBtn.textContent = "🔒 マップをロック";
+        relockBtn.style.cssText = `
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            z-index: 998;
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            display: none;
+        `;
+
+        // ロック解除
+        shield.addEventListener("click", (e) => {
+            e.stopPropagation();
+            shield.style.display = "none";
+            relockBtn.style.display = "block";
+        });
+
+        // 再ロック
+        relockBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            shield.style.display = "flex";
+            relockBtn.style.display = "none";
+        });
+
+        mapContainer.appendChild(shield);
+        mapContainer.appendChild(relockBtn);
+    }
+
     // --- 手動座標入力UI ---
 
     /**
@@ -454,6 +538,7 @@
             document.querySelector("app-submit-wayspot-map")
         );
         if (mapContainer) {
+            setupMapShield(mapContainer);
             createInputUI(mapContainer);
         }
         processHashData();
