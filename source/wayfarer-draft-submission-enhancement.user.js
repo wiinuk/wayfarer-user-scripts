@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.5
+// @version      1.6
 // @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -297,6 +297,52 @@
         throw new Error("コンポーネントまたはマップの取得に失敗しました。");
     }
 
+    // --- 読み込み待ちガード（オーバーレイ & バナー）UI ---
+
+    function showLoadingGuard() {
+        if (document.getElementById("custom-loading-guard-overlay")) return;
+
+        const overlay = document.createElement("div");
+        overlay.id = "custom-loading-guard-overlay";
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.4);
+            z-index: 99999;
+            pointer-events: all;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(1px);
+        `;
+
+        const banner = document.createElement("div");
+        banner.style.cssText = `
+            background: rgba(33, 33, 33, 0.85);
+            color: #ffffff;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            letter-spacing: 0.5px;
+        `;
+        banner.textContent = "⏳ 自動設定待機中…";
+
+        overlay.appendChild(banner);
+        document.body.appendChild(overlay);
+    }
+
+    function removeLoadingGuard() {
+        const overlay = document.getElementById("custom-loading-guard-overlay");
+        if (overlay) {
+            overlay.remove();
+        }
+    }
+
     // --- マップ操作誤作動防止用オーバーレイ（シールド）機能 ---
 
     /**
@@ -487,8 +533,12 @@
     function processHashData() {
         if (autoFillProcessed) return;
 
+        // 1. URLチェック
         const hash = window.location.hash;
         if (!hash.includes("#data=")) return;
+
+        // 2. ガード適用
+        showLoadingGuard();
 
         try {
             const jsonStr = decodeURIComponent(
@@ -496,7 +546,7 @@
             );
             const data = JSON.parse(jsonStr);
 
-            // 1. 座標反映
+            // 座標反映
             if (typeof data.lat === "number" && typeof data.lng === "number") {
                 try {
                     setPinCoordinate(data.lat, data.lng);
@@ -508,11 +558,11 @@
                     }
                 } catch (e) {
                     console.warn("座標の設定を再試行します", e);
-                    return; // 成功するまで次のフレームでやり直す
+                    return; // マップ読み込み完了まで待機し、次のDOM変更監視で再試行
                 }
             }
 
-            // 2. 指定されたIDセレクタで入力
+            // テキスト入力領域
             const nameInput = /** @type {HTMLInputElement} */ (
                 document.querySelector("textarea#title")
             );
@@ -529,10 +579,13 @@
             if (data.statement && stmtInput)
                 setInputValue(stmtInput, data.statement);
 
+            // 3. 反映 & 解除
             autoFillProcessed = true;
+            removeLoadingGuard();
         } catch (e) {
             console.error("ハッシュデータの解析に失敗しました:", e);
             autoFillProcessed = true;
+            removeLoadingGuard();
         }
     }
 
