@@ -419,7 +419,7 @@
                 ? a.distance - b.distance
                 : b.lastModified - a.lastModified
         );
-        const parent = assertsNonNull(cardItems[0].element.parentElement);
+        const parent = assertsNonNull(cardItems[0]?.element.parentElement);
         const needsReorder = cardItems.some(
             (item, index) => parent.children[index] !== item.element
         );
