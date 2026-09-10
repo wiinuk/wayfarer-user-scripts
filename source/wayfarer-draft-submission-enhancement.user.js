@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.16
-// @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。座標変更時のトースト通知。
+// @version      1.18
+// @description  下書き座標を数値で指定。他アプリからの自動入力。誤操作防止用シールド。座標変更時のトースト通知。座標移動のUndo/Redo。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -11,6 +11,137 @@
 
 (function () {
     "use strict";
+
+    // --- 座標履歴管理 (Undo / Redo) ---
+
+    /** @type {LatLng[]} */
+    const historyStack = [];
+    let historyIndex = -1;
+    let isProgrammaticMove = false; // Undo/Redo による自動移動中フラグ
+    /** @type {LatLng | null} */
+    let lastHistoryNavigationTarget = null;
+
+    /**
+     * 座標履歴に新しい座標を追加する
+     * @param {LatLng} latLng
+     */
+    function pushHistory(latLng) {
+        // 現在の履歴と同じ座標なら何もしない。
+        // これにより MutationObserver の重複通知で履歴が増えない。
+        const current = historyStack[historyIndex];
+        if (
+            current &&
+            Math.abs(current.lat - latLng.lat) < 1e-7 &&
+            Math.abs(current.lng - latLng.lng) < 1e-7
+        ) {
+            return;
+        }
+
+        // Undo後に新しい座標が入力された場合は、そこから先のRedo履歴を破棄。
+        if (historyIndex < historyStack.length - 1) {
+            historyStack.splice(historyIndex + 1);
+        }
+
+        historyStack.push({ lat: latLng.lat, lng: latLng.lng });
+        historyIndex = historyStack.length - 1;
+        updateUndoRedoButtons();
+    }
+
+    /**
+     * Undo / Redo ボタンの有効/無効状態を更新
+     */
+    function updateUndoRedoButtons() {
+        const undoBtn = /** @type {HTMLButtonElement | null} */ (
+            document.getElementById("custom-coord-undo-btn")
+        );
+        const redoBtn = /** @type {HTMLButtonElement | null} */ (
+            document.getElementById("custom-coord-redo-btn")
+        );
+
+        if (undoBtn) {
+            undoBtn.disabled = historyIndex <= 0;
+            undoBtn.style.opacity = undoBtn.disabled ? "0.4" : "1";
+            undoBtn.style.cursor = undoBtn.disabled ? "not-allowed" : "pointer";
+        }
+        if (redoBtn) {
+            redoBtn.disabled = historyIndex >= historyStack.length - 1;
+            redoBtn.style.opacity = redoBtn.disabled ? "0.4" : "1";
+            redoBtn.style.cursor = redoBtn.disabled ? "not-allowed" : "pointer";
+        }
+    }
+
+    /**
+     * 1つ前の座標に戻る
+     */
+    /**
+     * 履歴上の指定位置へ移動する。
+     * Undo/Redo の履歴移動と、DOM/Angular側の座標変更通知を分離する。
+     * @param {number} newIndex
+     */
+    function navigateHistory(newIndex) {
+        if (newIndex < 0 || newIndex >= historyStack.length) return;
+        if (newIndex === historyIndex) {
+            updateUndoRedoButtons();
+            return;
+        }
+
+        const target = historyStack[newIndex];
+        if (!target) return;
+
+        const previousIndex = historyIndex;
+        historyIndex = newIndex;
+        lastHistoryNavigationTarget = {
+            lat: target.lat,
+            lng: target.lng,
+        };
+
+        isProgrammaticMove = true;
+        try {
+            setPinCoordinate(target.lat, target.lng);
+        } catch (err) {
+            // 座標適用に失敗した場合は履歴位置も元へ戻す。
+            // 履歴だけ進んだ状態を残さない。
+            historyIndex = previousIndex;
+            lastHistoryNavigationTarget = null;
+            throw err;
+        } finally {
+            isProgrammaticMove = false;
+        }
+
+        updateUndoRedoButtons();
+    }
+
+    /**
+     * 1つ前の座標に戻る
+     */
+    function undoCoordinate() {
+        if (historyIndex > 0) {
+            try {
+                navigateHistory(historyIndex - 1);
+            } catch (err) {
+                alert(
+                    "Undoエラー: " +
+                        (err instanceof Error ? err.message : String(err))
+                );
+            }
+        }
+    }
+
+    /**
+     * 1つ後の座標に進む
+     */
+    function redoCoordinate() {
+        if (historyIndex < historyStack.length - 1) {
+            try {
+                navigateHistory(historyIndex + 1);
+            } catch (err) {
+                alert(
+                    "Redoエラー: " +
+                        (err instanceof Error ? err.message : String(err))
+                );
+            }
+        }
+    }
 
     // --- 座標解析処理（度分秒対応） ---
 
@@ -412,6 +543,33 @@
     /** @type {Element | null} */
     let observedElement = null;
 
+    /**
+     * @param {string} currentCoord
+     */
+    function handleCoordChange(currentCoord) {
+        showToast(`📍 座標が更新されました:\\n${currentCoord}`);
+        const parsed = parseCoordinates(currentCoord);
+        if (!parsed) return;
+
+        // Undo/Redo による座標変更は履歴へ追加しない。
+        // MutationObserver が同期/非同期のどちらで通知しても安全なように、
+        // 現在の履歴エントリと座標を照合する。
+        if (isProgrammaticMove || lastHistoryNavigationTarget) {
+            const target = lastHistoryNavigationTarget;
+            if (
+                target &&
+                Math.abs(target.lat - parsed.lat) < 1e-7 &&
+                Math.abs(target.lng - parsed.lng) < 1e-7
+            ) {
+                lastHistoryNavigationTarget = null;
+            }
+            return;
+        }
+
+        // ユーザー操作による新しい座標だけを履歴へ追加。
+        pushHistory(parsed);
+    }
+
     function setupCoordObserver() {
         const targetElement = document.querySelector(
             ".submit-coordinates-text"
@@ -427,11 +585,19 @@
         observedElement = targetElement;
         lastObservedCoord = (targetElement.textContent || "").trim();
 
+        // 初期状態で一度スタックへ保存
+        if (lastObservedCoord) {
+            const parsed = parseCoordinates(lastObservedCoord);
+            if (parsed && historyStack.length === 0) {
+                pushHistory(parsed);
+            }
+        }
+
         coordObserver = new MutationObserver(() => {
             const currentCoord = (targetElement.textContent || "").trim();
             if (currentCoord && currentCoord !== lastObservedCoord) {
                 lastObservedCoord = currentCoord;
-                showToast(`📍 座標が更新されました:\n${currentCoord}`);
+                handleCoordChange(currentCoord);
             }
         });
 
@@ -593,12 +759,42 @@
       font-family: sans-serif;
     `;
 
+        const undoBtn = document.createElement("button");
+        undoBtn.id = "custom-coord-undo-btn";
+        undoBtn.textContent = "↩ ";
+        undoBtn.title = "前の座標に戻る";
+        undoBtn.style.cssText = `
+      padding: 4px 8px;
+      background: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+        undoBtn.addEventListener("click", undoCoordinate);
+
+        const redoBtn = document.createElement("button");
+        redoBtn.id = "custom-coord-redo-btn";
+        redoBtn.textContent = "↪ ";
+        redoBtn.title = "次の座標に進む";
+        redoBtn.style.cssText = `
+      padding: 4px 8px;
+      background: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+        redoBtn.addEventListener("click", redoCoordinate);
+
         const input = document.createElement("input");
         input.id = "custom-coord-input-field";
         input.type = "text";
         input.placeholder = "35.6812, 139.7671 または 度分秒";
         input.style.cssText = `
-      width: 220px;
+      width: 200px;
       padding: 4px 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
@@ -646,6 +842,8 @@
             }
         });
 
+        container.appendChild(undoBtn);
+        container.appendChild(redoBtn);
         container.appendChild(input);
         container.appendChild(btn);
 
@@ -653,6 +851,8 @@
             mapContainer.style.position = "relative";
         }
         mapContainer.appendChild(container);
+
+        updateUndoRedoButtons();
     }
 
     // --- フォーム入力・Angular連携処理 ---
