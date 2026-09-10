@@ -1,16 +1,70 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.15.1
+// @version      1.16
 // @description  申請座標を入力。URLハッシュからの自動入力。誤操作防止用マップシールド。座標変更時のトースト通知。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
 //@ts-check
-//spell-checker:words wayspot
+//spell-checker:words wayspot relock
 
 (function () {
     "use strict";
+
+    // --- 座標解析処理（度分秒対応） ---
+
+    /**
+     * 度分秒（DMS）または十進数の座標文字列を解析して { lat, lng } を返す
+     * @param {string} input
+     * @returns {LatLng | null}
+     */
+    function parseCoordinates(input) {
+        const str = input.trim();
+
+        // 1. DMS形式の判定 (例: 38°55'27.0"N 140°20'08.0"E または 38°55'27.0"N, 140°20'08.0"E)
+        const dmsPattern =
+            /^\s*(\d+)[°\s]+(\d+)['\s]+([\d.]+)"?\s*([NS])[\s,]+(\d+)[°\s]+(\d+)['\s]+([\d.]+)"?\s*([EW])\s*$/i;
+        const dmsMatch = str.match(dmsPattern);
+
+        if (dmsMatch) {
+            const latDeg = assertsNonNull(dmsMatch[1]);
+            const latMin = assertsNonNull(dmsMatch[2]);
+            const latSec = assertsNonNull(dmsMatch[3]);
+            const latDir = assertsNonNull(dmsMatch[4]);
+            const lngDeg = assertsNonNull(dmsMatch[5]);
+            const lngMin = assertsNonNull(dmsMatch[6]);
+            const lngSec = assertsNonNull(dmsMatch[7]);
+            const lngDir = assertsNonNull(dmsMatch[8]);
+
+            let lat =
+                parseFloat(latDeg) +
+                parseFloat(latMin) / 60 +
+                parseFloat(latSec) / 3600;
+            let lng =
+                parseFloat(lngDeg) +
+                parseFloat(lngMin) / 60 +
+                parseFloat(lngSec) / 3600;
+
+            if (latDir.toUpperCase() === "S") lat = -lat;
+            if (lngDir.toUpperCase() === "W") lng = -lng;
+
+            return { lat, lng };
+        }
+
+        // 2. 十進数形式の判定 (例: 35.6812, 139.7671 または 35.6812 139.7671)
+        const [lat, lng] = str.split(/[\s,]+/).map(parseFloat);
+        if (
+            lat !== undefined &&
+            lng !== undefined &&
+            !isNaN(lat) &&
+            !isNaN(lng)
+        ) {
+            return { lat, lng };
+        }
+
+        return null;
+    }
 
     // --- 地図・コンポーネント解析処理 ---
 
@@ -363,21 +417,14 @@
             ".submit-coordinates-text"
         );
 
-        // 要素が存在しない場合は何もしない
         if (!targetElement) return;
-
-        // 既に同じDOM要素を監視中の場合はスキップ
         if (coordObserver && observedElement === targetElement) return;
 
-        // 要素が再生成（または初回取得）された場合、既存のObserverを解除
         if (coordObserver) {
             coordObserver.disconnect();
         }
 
-        // 監視対象要素を保持
         observedElement = targetElement;
-
-        // 初期値の保持
         lastObservedCoord = (targetElement.textContent || "").trim();
 
         coordObserver = new MutationObserver(() => {
@@ -549,9 +596,9 @@
         const input = document.createElement("input");
         input.id = "custom-coord-input-field";
         input.type = "text";
-        input.placeholder = "35.6812, 139.7671";
+        input.placeholder = "35.6812, 139.7671 または 度分秒";
         input.style.cssText = `
-      width: 180px;
+      width: 220px;
       padding: 4px 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
@@ -571,19 +618,12 @@
     `;
 
         const applyCoordinate = () => {
-            const value = input.value.trim();
-            const parts = value.split(",").map((s) => parseFloat(s.trim()));
+            const rawValue = input.value;
+            const parsed = parseCoordinates(rawValue);
 
-            if (
-                parts.length === 2 &&
-                !isNaN(assertsNonNull(parts[0])) &&
-                !isNaN(assertsNonNull(parts[1]))
-            ) {
+            if (parsed) {
                 try {
-                    setPinCoordinate(
-                        assertsNonNull(parts[0]),
-                        assertsNonNull(parts[1])
-                    );
+                    setPinCoordinate(parsed.lat, parsed.lng);
                 } catch (err) {
                     alert(
                         "エラー: " +
@@ -591,7 +631,9 @@
                     );
                 }
             } else {
-                alert("座標の形式が正しくありません。\n例: 35.6812, 139.7671");
+                alert(
+                    "座標の形式が正しくありません。\n例1: 35.6812, 139.7671\n例2: 38°55'27.0\"N 140°20'08.0\"E"
+                );
             }
         };
 
@@ -631,11 +673,9 @@
     function processHashData() {
         if (autoFillProcessed) return;
 
-        // 1. URLチェック
         const hash = window.location.hash;
         if (!hash.includes("#data=")) return;
 
-        // 2. ガード適用
         showLoadingGuard();
 
         try {
@@ -644,7 +684,6 @@
             );
             const data = JSON.parse(jsonStr);
 
-            // 座標反映
             if (typeof data.lat === "number" && typeof data.lng === "number") {
                 try {
                     setPinCoordinate(data.lat, data.lng);
@@ -656,11 +695,10 @@
                     }
                 } catch (e) {
                     console.warn("座標の設定を再試行します", e);
-                    return; // マップ読み込み完了まで待機し、次のDOM変更監視で再試行
+                    return;
                 }
             }
 
-            // テキスト入力領域
             const nameInput = /** @type {HTMLInputElement} */ (
                 document.querySelector("textarea#title")
             );
@@ -677,7 +715,6 @@
             if (data.statement && stmtInput)
                 setInputValue(stmtInput, data.statement);
 
-            // 3. 反映 & 解除
             autoFillProcessed = true;
             removeLoadingGuard();
         } catch (e) {
