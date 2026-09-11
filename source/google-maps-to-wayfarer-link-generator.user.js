@@ -8,11 +8,18 @@
 // @match        https://www.google.co.jp/maps/*
 // @grant        none
 // ==/UserScript==
+//@ts-check
+//spell-checker: words Wayspot noopener noreferrer
 
 (function () {
     "use strict";
 
     // Wayfarer用のURLを作成する関数
+    /**
+     * @param {string} name
+     * @param {string} lat
+     * @param {string} lng
+     */
     function generateWayfarerUrl(name, lat, lng) {
         const dataObj = {
             lat: parseFloat(lat),
@@ -31,14 +38,45 @@
         for (const e of document.querySelectorAll(
             '[role="main"] [role="region"] ~ [role="region"] button .fontBodySmall'
         )) {
-            if (e.innerText !== "") return e;
+            if (e instanceof HTMLElement && e.innerText !== "") return e;
+        }
+    }
+    function getAddressElement() {
+        for (const e of document.querySelectorAll(
+            `[role="main"] [role="region"] ~ [role="region"] ~ * [role="button"] [role="img"].google-symbols ~ *`
+        )) {
+            if (e instanceof HTMLElement && e.innerText !== "") return e;
         }
     }
 
+    function getPlaceNameFromUrl() {
+        const path = window.location.pathname;
+        const match = path.match(/\/place\/([^/]+)/);
+
+        if (match && match[1]) {
+            const rawName = match[1].replace(/\+/g, " ");
+            try {
+                return decodeURIComponent(rawName);
+            } catch (e) {
+                return rawName;
+            }
+        }
+        return null;
+    }
+    /**
+     * @param {string} title
+     */
     function isDefaultTitle(title) {
-        return /^\s*\d+°\d+'\d+(?:\.\d+)?"[NS]\s+\d+°\d+'\d+(?:\.\d+)?"[EW]\s*$/.test(
-            title
-        );
+        if (
+            /^\s*\d+°\d+'\d+(?:\.\d+)?"[NS]\s+\d+°\d+'\d+(?:\.\d+)?"[EW]\s*$/.test(
+                title
+            )
+        ) {
+            return getPlaceNameFromUrl() === title;
+        }
+
+        const addressElement = getAddressElement();
+        return addressElement && addressElement.innerText === title;
     }
 
     // URLから座標、DOMから名称を取得する関数
@@ -52,7 +90,7 @@
 
         const titleElement = [...document.querySelectorAll("h1")].at(-1);
         let name = titleElement?.innerText.trim();
-        if (isDefaultTitle(name)) {
+        if (name != null && isDefaultTitle(name)) {
             const myDescriptionElement = getMyListDescriptionElement();
             if (myDescriptionElement) {
                 name = myDescriptionElement.innerText.split("。")[0];
@@ -92,8 +130,8 @@
         if (poi) {
             const wayfarerUrl = generateWayfarerUrl(poi.name, poi.lat, poi.lng);
             // 既に表示中かつ内容が変わっていない場合は再描画しない（チラつき防止）
-            if (container.dataset.currentUrl !== wayfarerUrl) {
-                container.dataset.currentUrl = wayfarerUrl;
+            if (container.dataset["currentUrl"] !== wayfarerUrl) {
+                container.dataset["currentUrl"] = wayfarerUrl;
                 container.innerHTML = `
                     <div style="font-weight: bold; margin-bottom: 4px;">Wayfarer リンク</div>
                     <a href="${wayfarerUrl}" target="_blank" rel="noopener noreferrer" style="color: #1a73e8; text-decoration: none; word-break: break-all;">
@@ -103,7 +141,7 @@
             }
             container.style.display = "block";
         } else {
-            container.dataset.currentUrl = "";
+            container.dataset["currentUrl"] = "";
             container.style.display = "none";
         }
     }
