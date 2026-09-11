@@ -22,7 +22,7 @@
     const STORE_NAME = "responses";
 
     const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const MAX_CACHE_ENTRIES = 5000;
+    const MAX_CACHE_ENTRIES = 10000;
 
     const TARGET_ORIGIN = "https://wayfarer.scopely.com";
     const TARGET_PATH = "/api/v1/vault/reverse-geocode";
