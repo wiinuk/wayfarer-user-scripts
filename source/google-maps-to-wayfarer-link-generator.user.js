@@ -25,8 +25,7 @@
             lat: parseFloat(lat),
             lng: parseFloat(lng),
             title: name,
-            description: "",
-            statement: "",
+            save: true,
         };
         const jsonString = JSON.stringify(dataObj);
         return `https://wayfarer.scopely.com/new/submit/new#data=${encodeURIComponent(
@@ -135,7 +134,7 @@
                 container.innerHTML = `
                     <div style="font-weight: bold; margin-bottom: 4px;">Wayfarer リンク</div>
                     <a href="${wayfarerUrl}" target="_blank" rel="noopener noreferrer" style="color: #1a73e8; text-decoration: none; word-break: break-all;">
-                        🚀 「${poi.name}」をWayspotとして提出
+                        🚀 「${poi.name}」を下書きとして保存
                     </a>
                 `;
             }
