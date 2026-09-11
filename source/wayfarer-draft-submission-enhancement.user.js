@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.18
-// @description  下書き座標を数値で指定。他アプリからの自動入力。誤操作防止用シールド。座標変更時のトースト通知。座標移動のUndo/Redo。
+// @version      1.19
+// @description  下書き座標を数値で指定。他アプリからの自動操作。誤操作防止用シールド。座標変更時のトースト通知。座標移動のUndo/Redo。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -78,8 +78,6 @@
      * @param {LatLng} latLng
      */
     function pushHistory(latLng) {
-        // 現在の履歴と同じ座標なら何もしない。
-        // これにより MutationObserver の重複通知で履歴が増えない。
         const current = historyStack[historyIndex];
         if (
             current &&
@@ -89,7 +87,6 @@
             return;
         }
 
-        // Undo後に新しい座標が入力された場合は、そこから先のRedo履歴を破棄。
         if (historyIndex < historyStack.length - 1) {
             historyStack.splice(historyIndex + 1);
         }
@@ -123,11 +120,7 @@
     }
 
     /**
-     * 1つ前の座標に戻る
-     */
-    /**
-     * 履歴上の指定位置へ移動する。
-     * Undo/Redo の履歴移動と、DOM/Angular側の座標変更通知を分離する。
+     * 履歴上の指定位置へ移動する
      * @param {number} newIndex
      */
     function navigateHistory(newIndex) {
@@ -151,8 +144,6 @@
         try {
             setPinCoordinate(target.lat, target.lng);
         } catch (err) {
-            // 座標適用に失敗した場合は履歴位置も元へ戻す。
-            // 履歴だけ進んだ状態を残さない。
             historyIndex = previousIndex;
             lastHistoryNavigationTarget = null;
             throw err;
@@ -205,7 +196,6 @@
     function parseCoordinates(input) {
         const str = input.trim();
 
-        // 1. DMS形式の判定 (例: 38°55'27.0"N 140°20'08.0"E または 38°55'27.0"N, 140°20'08.0"E)
         const dmsPattern =
             /^\s*(\d+)[°\s]+(\d+)['\s]+([\d.]+)"?\s*([NS])[\s,]+(\d+)[°\s]+(\d+)['\s]+([\d.]+)"?\s*([EW])\s*$/i;
         const dmsMatch = str.match(dmsPattern);
@@ -235,7 +225,6 @@
             return { lat, lng };
         }
 
-        // 2. 十進数形式の判定 (例: 35.6812, 139.7671 または 35.6812 139.7671)
         const [lat, lng] = str.split(/[\s,]+/).map(parseFloat);
         if (
             lat !== undefined &&
@@ -313,7 +302,6 @@
      * @property {unknown} [onMapClick]
      * @property {unknown} [_updateMapSelection]
      * @property {unknown} [_applySelectedMarker]
-     *
      */
 
     /**
@@ -587,13 +575,10 @@
      * @param {string} currentCoord
      */
     function handleCoordChange(currentCoord) {
-        showToast(`📍 座標が更新されました:\\n${currentCoord}`);
+        showToast(`📍 座標が更新されました:\n${currentCoord}`);
         const parsed = parseCoordinates(currentCoord);
         if (!parsed) return;
 
-        // Undo/Redo による座標変更は履歴へ追加しない。
-        // MutationObserver が同期/非同期のどちらで通知しても安全なように、
-        // 現在の履歴エントリと座標を照合する。
         if (isProgrammaticMove || lastHistoryNavigationTarget) {
             const target = lastHistoryNavigationTarget;
             if (
@@ -606,7 +591,6 @@
             return;
         }
 
-        // ユーザー操作による新しい座標だけを履歴へ追加。
         pushHistory(parsed);
     }
 
@@ -625,7 +609,6 @@
         observedElement = targetElement;
         lastObservedCoord = (targetElement.textContent || "").trim();
 
-        // 初期状態で一度スタックへ保存
         if (lastObservedCoord) {
             const parsed = parseCoordinates(lastObservedCoord);
             if (parsed && historyStack.length === 0) {
@@ -648,7 +631,7 @@
         });
     }
 
-    // --- 読み込み待ちガード（オーバーレイ & バナー）UI ---
+    // --- 読み込み待ちガード UI ---
 
     function showLoadingGuard() {
         if (document.getElementById("custom-loading-guard-overlay")) return;
@@ -694,7 +677,7 @@
         }
     }
 
-    // --- マップ操作誤作動防止用オーバーレイ（シールド）機能 ---
+    // --- マップ操作誤作動防止用オーバーレイ ---
 
     /**
      * @param {HTMLElement} mapContainer
@@ -898,7 +881,7 @@
     // --- フォーム入力・Angular連携処理 ---
 
     /**
-     * @param {HTMLTextAreaElement | HTMLInputElement} element
+     * @param {HTMLTextAreaElement} element
      * @param {string} value
      */
     function setInputValue(element, value) {
@@ -917,11 +900,24 @@
     function trySetInputValue(element, data, key) {
         if (
             hasNonEmptyStringProperty(data, key) &&
-            (element instanceof HTMLInputElement ||
-                element instanceof HTMLTextAreaElement)
+            element instanceof HTMLTextAreaElement
         ) {
             setInputValue(element, data[key]);
         }
+    }
+
+    /**
+     * SPAのページ遷移完了を監視してタブを閉じる
+     */
+    function waitForNavigationAndClose() {
+        const initialUrl = window.location.href;
+
+        const checkInterval = setInterval(() => {
+            if (window.location.href !== initialUrl) {
+                clearInterval(checkInterval);
+                window.close();
+            }
+        }, 300);
     }
 
     let autoFillProcessed = false;
@@ -970,6 +966,29 @@
             trySetInputValue(stmtInput, data, "statement");
 
             autoFillProcessed = true;
+
+            // save: true が指定されている場合の保存処理
+            if (hasProperty(data, "save", "boolean") && data.save) {
+                if (nameInput && nameInput instanceof HTMLTextAreaElement) {
+                    if (!nameInput.value || nameInput.value.trim() === "") {
+                        setInputValue(nameInput, "<empty>");
+                    }
+                }
+
+                const saveBtn = /** @type {HTMLButtonElement | null} */ (
+                    document.querySelector("button.save-draft-button")
+                );
+
+                if (saveBtn) {
+                    saveBtn.click();
+                    waitForNavigationAndClose();
+                } else {
+                    console.warn(
+                        "「下書きとして保存」ボタンが見つかりませんでした。"
+                    );
+                }
+            }
+
             removeLoadingGuard();
         } catch (e) {
             console.error("ハッシュデータの解析に失敗しました:", e);
