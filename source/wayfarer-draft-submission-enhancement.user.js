@@ -12,6 +12,58 @@
 (function () {
     "use strict";
 
+    /**
+     * @typedef {(...args: unknown[]) => unknown} UnknownFunction
+     */
+
+    /**
+     * @template T
+     * @param {T} value
+     */
+    function assertsNonNull(value) {
+        return /** @type {NonNullable<T>} */ (value);
+    }
+
+    /**
+     * @typedef {Object} TypeMap
+     * @property {string} string
+     * @property {number} number
+     * @property {boolean} boolean
+     * @property {symbol} symbol
+     * @property {undefined} undefined
+     * @property {Function} function
+     * @property {object} object
+     * @property {bigint} bigint
+     */
+
+    /**
+     * @template T
+     * @template {string} K
+     * @template {keyof TypeMap} U
+     * @param {T} value
+     * @param {K} key
+     * @param {U} typeName
+     * @returns {value is T & Record<K, TypeMap[U]>}
+     */
+    function hasProperty(value, key, typeName) {
+        return (
+            typeof value === "object" &&
+            value !== null &&
+            key in value &&
+            typeof (/** @type {Record<K, string>} */ (value)[key]) === typeName
+        );
+    }
+    /**
+     * @template T
+     * @template {string} K
+     * @param {T} value
+     * @param {K} key
+     * @returns {value is T & Record<K, string>}
+     */
+    function hasNonEmptyStringProperty(value, key) {
+        return hasProperty(value, key, "string") && !!value[key];
+    }
+
     // --- 座標履歴管理 (Undo / Redo) ---
 
     /** @type {LatLng[]} */
@@ -198,18 +250,6 @@
     }
 
     // --- 地図・コンポーネント解析処理 ---
-
-    /**
-     * @typedef {(...args: unknown[]) => unknown} UnknownFunction
-     */
-
-    /**
-     * @template T
-     * @param {T} value
-     */
-    function assertsNonNull(value) {
-        return /** @type {NonNullable<T>} */ (value);
-    }
 
     /**
      * @typedef {object} GoogleMap
@@ -858,7 +898,7 @@
     // --- フォーム入力・Angular連携処理 ---
 
     /**
-     * @param {HTMLInputElement} element
+     * @param {HTMLTextAreaElement | HTMLInputElement} element
      * @param {string} value
      */
     function setInputValue(element, value) {
@@ -866,6 +906,22 @@
         element.value = value;
         element.dispatchEvent(new Event("input", { bubbles: true }));
         element.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    /**
+     * @template {string} K
+     * @param {Element | null} element
+     * @param {unknown} data
+     * @param {K} key
+     */
+    function trySetInputValue(element, data, key) {
+        if (
+            hasNonEmptyStringProperty(data, key) &&
+            (element instanceof HTMLInputElement ||
+                element instanceof HTMLTextAreaElement)
+        ) {
+            setInputValue(element, data[key]);
+        }
     }
 
     let autoFillProcessed = false;
@@ -882,9 +938,13 @@
             const jsonStr = decodeURIComponent(
                 hash.substring(hash.indexOf("#data=") + 6)
             );
+            /** @type {unknown} */
             const data = JSON.parse(jsonStr);
 
-            if (typeof data.lat === "number" && typeof data.lng === "number") {
+            if (
+                hasProperty(data, "lat", "number") &&
+                hasProperty(data, "lng", "number")
+            ) {
                 try {
                     setPinCoordinate(data.lat, data.lng);
                     const coordInput = /** @type {HTMLInputElement} */ (
@@ -899,21 +959,15 @@
                 }
             }
 
-            const nameInput = /** @type {HTMLInputElement} */ (
-                document.querySelector("textarea#title")
-            );
-            const descInput = /** @type {HTMLInputElement} */ (
-                document.querySelector("textarea#description")
-            );
-            const stmtInput = /** @type {HTMLInputElement} */ (
-                document.querySelector("textarea#supportingStatement")
+            const nameInput = document.querySelector("textarea#title");
+            const descInput = document.querySelector("textarea#description");
+            const stmtInput = document.querySelector(
+                "textarea#supportingStatement"
             );
 
-            if (data.title && nameInput) setInputValue(nameInput, data.title);
-            if (data.description && descInput)
-                setInputValue(descInput, data.description);
-            if (data.statement && stmtInput)
-                setInputValue(stmtInput, data.statement);
+            trySetInputValue(nameInput, data, "title");
+            trySetInputValue(descInput, data, "description");
+            trySetInputValue(stmtInput, data, "statement");
 
             autoFillProcessed = true;
             removeLoadingGuard();
