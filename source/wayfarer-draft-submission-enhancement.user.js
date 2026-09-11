@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.19
+// @version      1.20
 // @description  下書き座標を数値で指定。他アプリからの自動操作。誤操作防止用シールド。座標変更時のトースト通知。座標移動のUndo/Redo。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -52,16 +52,6 @@
             key in value &&
             typeof (/** @type {Record<K, string>} */ (value)[key]) === typeName
         );
-    }
-    /**
-     * @template T
-     * @template {string} K
-     * @param {T} value
-     * @param {K} key
-     * @returns {value is T & Record<K, string>}
-     */
-    function hasNonEmptyStringProperty(value, key) {
-        return hasProperty(value, key, "string") && !!value[key];
     }
 
     // --- 座標履歴管理 (Undo / Redo) ---
@@ -899,7 +889,7 @@
      */
     function trySetInputValue(element, data, key) {
         if (
-            hasNonEmptyStringProperty(data, key) &&
+            hasProperty(data, key, "string") &&
             element instanceof HTMLTextAreaElement
         ) {
             setInputValue(element, data[key]);
