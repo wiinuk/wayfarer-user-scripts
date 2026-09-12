@@ -136,7 +136,7 @@
             background-color: #388e3c;
         }
 
-        /* 位置認証して保存ボタン */
+        /* 位置認証ボタン */
         .${classNames.btnAutoSave} {
             margin-left: 10px;
             padding: 5px 10px;
@@ -471,8 +471,8 @@
             const draft = draftId ? draftMap.get(draftId) : undefined;
             if (!draft) return;
 
-            const h3 = draftCard.querySelector("h3");
-            if (!h3) return;
+            const title = draftCard.querySelector(".submission-title");
+            if (!title) return;
 
             let locationBadge = /** @type {HTMLElement | null} */ (
                 draftCard.querySelector(`.${classNames.locationBadge}`)
@@ -481,7 +481,7 @@
             if (!locationBadge) {
                 locationBadge = document.createElement("span");
                 locationBadge.className = classNames.locationBadge;
-                h3.appendChild(locationBadge);
+                title.prepend(locationBadge);
             }
 
             const isAttested = Boolean(draft.locationAttested);
@@ -499,7 +499,7 @@
                 if (!distBadge) {
                     distBadge = document.createElement("span");
                     distBadge.className = classNames.distanceBadge;
-                    h3.appendChild(distBadge);
+                    title.appendChild(distBadge);
                 }
 
                 const distance =
@@ -889,7 +889,7 @@
     // -------------------------------------------------------------------------
 
     /**
-     * 下書きカードに「位置認証して保存」ボタンを追加する。
+     * 下書きカードに「位置認証」ボタンを追加する。
      */
     function addAutoSaveButtons() {
         const draftCards = Array.from(
@@ -911,6 +911,14 @@
             const draft = draftMap.get(draftId);
             if (!draft) return;
 
+            // 既に位置認証（位置確認）済みの場合はボタンを表示しない
+            if (draft.locationAttested) {
+                return;
+            }
+
+            const title = draftCard.querySelector(".submission-title");
+            if (!title) return;
+
             const button = document.createElement("button");
 
             button.type = "button";
@@ -926,17 +934,7 @@
                 startDraftAutoSave(card, draftId, button);
             });
 
-            /*
-             * カード内のどこに置いてもよいように、
-             * submission-details の末尾に追加する。
-             */
-            const details = card.querySelector(".submission-details");
-
-            if (details) {
-                details.appendChild(button);
-            } else {
-                card.appendChild(button);
-            }
+            title.prepend(button);
         });
     }
 
