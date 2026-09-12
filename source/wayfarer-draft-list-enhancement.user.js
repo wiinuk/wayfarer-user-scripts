@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Drafts List Enhancement
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Sort Niantic Wayfarer drafts using precise coordinates from API response
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -10,6 +10,8 @@
 
 (function () {
     "use strict";
+
+    const TARGET_PATH = "/new/submit";
 
     // -------------------------------------------------------------------------
     // 1. クラス名・プレフィックスの設定とスタイルの定義
@@ -96,8 +98,10 @@
         (document.head || document.documentElement).appendChild(styleElement);
     }
 
-    // スタイルを直ちに注入
-    injectStyles();
+    function removeStyles() {
+        const styleElement = document.getElementById(classNames.styleId);
+        if (styleElement) styleElement.remove();
+    }
 
     // -------------------------------------------------------------------------
     // 2. 型定義・状態管理
@@ -176,6 +180,9 @@
     /** @type {number | null} */
     let draftStateApplyTimer = null;
     let locationCheckInProgress = false;
+    /** @type {MutationObserver | null} */
+    let observer = null;
+    let isActive = false; // 対象ページで実行中かどうか
 
     try {
         /** @type {DraftListState | null} */
@@ -254,11 +261,13 @@
     }
 
     function scheduleDraftStateApply() {
+        if (!isActive) return;
         if (draftStateApplyTimer !== null) {
             window.clearTimeout(draftStateApplyTimer);
         }
         draftStateApplyTimer = window.setTimeout(() => {
             draftStateApplyTimer = null;
+            if (!isActive) return;
             applyDraftFilter();
             if (draftSortState.sortMode === "distance") {
                 if (
@@ -419,7 +428,9 @@
                 ? a.distance - b.distance
                 : b.lastModified - a.lastModified
         );
-        const parent = assertsNonNull(cardItems[0]?.element.parentElement);
+        const parent = cardItems[0]?.element.parentElement;
+        if (!parent) return false;
+
         const needsReorder = cardItems.some(
             (item, index) => parent.children[index] !== item.element
         );
@@ -450,6 +461,8 @@
     const originalFetch = window.fetch;
     window.fetch = async function (...args) {
         const response = await originalFetch.apply(this, args);
+        if (!isActive) return response; // 別ページにいる時はスキップ
+
         const url =
             typeof args[0] === "string"
                 ? args[0]
@@ -486,6 +499,7 @@
     const originalXhrSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function (/** @type {any} */ ...args) {
         this.addEventListener("load", () => {
+            if (!isActive) return; // 別ページにいる時はスキップ
             const url = xhrUrls.get(this);
             if (!url || !url.includes("/api/v1/vault/submit/get/drafts"))
                 return;
@@ -784,11 +798,90 @@
         });
     }
 
-    // ページの動的描画に対応
-    const observer = new MutationObserver(() => {
+    function removeAddedUI() {
+        [
+            "sort-drafts-btn",
+            "filter-drafts-btn",
+            "filter-location-attested-btn",
+        ].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        document
+            .querySelectorAll(
+                `.${classNames.locationBadge}, .${classNames.distanceBadge}`
+            )
+            .forEach((el) => el.remove());
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. ライフサイクル管理（有効化・無効化）
+    // -------------------------------------------------------------------------
+    function start() {
+        if (isActive) return;
+        isActive = true;
+
         injectStyles();
         addSortButton();
-        scheduleDraftStateApply();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+
+        if (!observer) {
+            observer = new MutationObserver(() => {
+                if (!isActive) return;
+                injectStyles();
+                addSortButton();
+                scheduleDraftStateApply();
+            });
+        }
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function stop() {
+        if (!isActive) return;
+        isActive = false;
+
+        // Observerの停止
+        if (observer) {
+            observer.disconnect();
+        }
+
+        // タイマー破棄
+        if (draftStateApplyTimer !== null) {
+            clearTimeout(draftStateApplyTimer);
+            draftStateApplyTimer = null;
+        }
+
+        // キャッシュクリア
+        draftMap.clear();
+
+        // 注入したUIとスタイルの破棄
+        removeAddedUI();
+        removeStyles();
+    }
+
+    // SPAのルーティング変化の検知
+    function handleLocationChange() {
+        if (window.location.pathname === TARGET_PATH) {
+            start();
+        } else {
+            stop();
+        }
+    }
+
+    // pushState / replaceState のフック（SPA遷移検出用）
+    const originalPushState = history.pushState;
+    history.pushState = function (...args) {
+        originalPushState.apply(this, args);
+        handleLocationChange();
+    };
+
+    const originalReplaceState = history.replaceState;
+    history.replaceState = function (...args) {
+        originalReplaceState.apply(this, args);
+        handleLocationChange();
+    };
+
+    window.addEventListener("popstate", handleLocationChange);
+
+    // 初回実行チェック
+    handleLocationChange();
 })();
