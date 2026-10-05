@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.20
-// @description  下書き座標を数値で指定。他アプリからの自動操作。誤操作防止用シールド。座標変更時のトースト通知。座標移動のUndo/Redo。
+// @version      1.21
+// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
 //@ts-check
-//spell-checker:words wayspot relock
+//spell-checker:words wayspot
 
 (function () {
     "use strict";
@@ -667,86 +667,6 @@
         }
     }
 
-    // --- マップ操作誤作動防止用オーバーレイ ---
-
-    /**
-     * @param {HTMLElement} mapContainer
-     */
-    function setupMapShield(mapContainer) {
-        if (document.getElementById("custom-map-shield")) return;
-
-        if (getComputedStyle(mapContainer).position === "static") {
-            mapContainer.style.position = "relative";
-        }
-
-        const shield = document.createElement("div");
-        shield.id = "custom-map-shield";
-        shield.style.cssText = `
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 999;
-            background: rgba(0, 0, 0, 0.4);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            backdrop-filter: blur(2px);
-            transition: opacity 0.2s ease;
-        `;
-
-        const badge = document.createElement("div");
-        badge.style.cssText = `
-            background: rgba(0, 0, 0, 0.75);
-            color: #fff;
-            padding: 10px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: bold;
-            text-align: center;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-            pointer-events: none;
-            user-select: none;
-        `;
-        badge.innerHTML = "🔒 タップしてマップ操作を有効化";
-        shield.appendChild(badge);
-
-        const relockBtn = document.createElement("button");
-        relockBtn.id = "custom-map-relock-btn";
-        relockBtn.textContent = "🔒 マップをロック";
-        relockBtn.style.cssText = `
-            position: absolute;
-            bottom: 12px;
-            right: 12px;
-            z-index: 998;
-            padding: 6px 12px;
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 16px;
-            font-size: 12px;
-            cursor: pointer;
-            display: none;
-        `;
-
-        shield.addEventListener("click", (e) => {
-            e.stopPropagation();
-            shield.style.display = "none";
-            relockBtn.style.display = "block";
-        });
-
-        relockBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            shield.style.display = "flex";
-            relockBtn.style.display = "none";
-        });
-
-        mapContainer.appendChild(shield);
-        mapContainer.appendChild(relockBtn);
-    }
-
     // --- 手動座標入力UI ---
 
     /**
@@ -994,7 +914,6 @@
             document.querySelector("app-submit-wayspot-map")
         );
         if (mapContainer) {
-            setupMapShield(mapContainer);
             createInputUI(mapContainer);
         }
         setupCoordObserver();
