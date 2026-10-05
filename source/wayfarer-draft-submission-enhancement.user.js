@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.21
-// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。
+// @version      1.22
+// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンを中心とした20m円の描画。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -52,6 +52,40 @@
             key in value &&
             typeof (/** @type {Record<K, string>} */ (value)[key]) === typeName
         );
+    }
+
+    // --- 20m 円描画の管理 ---
+
+    /** @type {GoogleMapsCircle | null} */
+    let currentCircle = null;
+
+    /**
+     * Google Map上に半径20mの円を描画・更新する
+     * @param {GoogleMap} map
+     * @param {LatLng} latLng
+     */
+    function update20mCircle(map, latLng) {
+        const googleMaps = /** @type {WindowWithGoogle} */ (window).google.maps;
+        if (!googleMaps) return;
+
+        if (!currentCircle) {
+            // 円オブジェクトの新規生成
+            currentCircle = new googleMaps.Circle({
+                strokeColor: "#FF0000",
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                fillColor: "#FF0000",
+                fillOpacity: 0.15,
+                map,
+                center: latLng,
+                radius: 20, // 20m
+                clickable: false,
+            });
+        } else {
+            // 既存の円を移動・Map割り当て更新
+            currentCircle.setMap(map);
+            currentCircle.setCenter(latLng);
+        }
     }
 
     // --- 座標履歴管理 (Undo / Redo) ---
@@ -443,12 +477,35 @@
     }
 
     /**
+     * @typedef {object} CircleOptions
+     * @property {LatLng} [center]
+     * @property {number} [radius]
+     * @property {string} [strokeColor]
+     * @property {number} [strokeOpacity]
+     * @property {number} [strokeWeight]
+     * @property {string} [fillColor]
+     * @property {number} [fillOpacity]
+     * @property {GoogleMap} [map]
+     * @property {boolean} [clickable]
+     */
+    /**
+     * @typedef {object} GoogleMapsCircle
+     * @property {(map: GoogleMap | null) => void} setMap
+     * @property {(center: LatLng) => void} setCenter
+     * @property {(radius: number) => void} setRadius
+     * @property {() => LatLng} getCenter
+     * @property {() => number} getRadius
+     */
+    /**
+     * @typedef {{ new(options?: CircleOptions): GoogleMapsCircle }} GoogleMapsCircleConstructor
+     */
+    /**
      * @typedef {object} GoogleMapsEventNamespace
      * @property {(map: GoogleMap, type: string, options: { latLng: LatLng }) => unknown} trigger
      */
     /**
      * @typedef {{ new(lat: number, lng: number): LatLng }} GoogleMapsLatLngConstructor
-     * @typedef {typeof window & { google?: { maps?: { LatLng: GoogleMapsLatLngConstructor, event: GoogleMapsEventNamespace } } }} WindowWithGoogle
+     * @typedef {typeof window & { google: { maps?: { LatLng: GoogleMapsLatLngConstructor, Circle: GoogleMapsCircleConstructor, event: GoogleMapsEventNamespace } } }} WindowWithGoogle
      */
 
     /**
@@ -460,8 +517,7 @@
             throw new Error("有効な数値の緯度・経度を入力してください。");
         }
 
-        const googleMaps = /** @type {WindowWithGoogle} */ (window).google
-            ?.maps;
+        const googleMaps = /** @type {WindowWithGoogle} */ (window).google.maps;
         if (!googleMaps)
             throw new Error("Google Maps APIが読み込まれていません。");
 
@@ -473,6 +529,8 @@
             nativeMap.setCenter(target);
             const zoom = nativeMap.getZoom();
             nativeMap.setZoom(Math.max(zoom, 16));
+            // ピン移動に合わせて円を描画・更新
+            update20mCircle(nativeMap, target);
         }
 
         if (submitComponent) {
@@ -569,6 +627,13 @@
         const parsed = parseCoordinates(currentCoord);
         if (!parsed) return;
 
+        // 画面操作等で座標が変わった場合にも20m円を描画更新
+        const submitComponent = findRawSubmitComponent();
+        const nativeMap = resolveMapFromComponent(submitComponent);
+        if (nativeMap) {
+            update20mCircle(nativeMap, parsed);
+        }
+
         if (isProgrammaticMove || lastHistoryNavigationTarget) {
             const target = lastHistoryNavigationTarget;
             if (
@@ -601,8 +666,15 @@
 
         if (lastObservedCoord) {
             const parsed = parseCoordinates(lastObservedCoord);
-            if (parsed && historyStack.length === 0) {
-                pushHistory(parsed);
+            if (parsed) {
+                if (historyStack.length === 0) {
+                    pushHistory(parsed);
+                }
+                const submitComponent = findRawSubmitComponent();
+                const nativeMap = resolveMapFromComponent(submitComponent);
+                if (nativeMap) {
+                    update20mCircle(nativeMap, parsed);
+                }
             }
         }
 
