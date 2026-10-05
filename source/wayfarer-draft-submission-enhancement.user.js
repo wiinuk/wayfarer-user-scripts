@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.22
-// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンを中心とした20m円の描画。
+// @version      1.23
+// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンマーカーの描画。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -54,17 +54,17 @@
         );
     }
 
-    // --- 20m 円描画の管理 ---
+    // --- ピンマーカー描画の管理 ---
 
     /** @type {GoogleMapsCircle | null} */
     let currentCircle = null;
 
     /**
-     * Google Map上に半径20mの円を描画・更新する
+     * Google Map 上のピンに関連するマーカーを描画・更新する
      * @param {GoogleMap} map
      * @param {LatLng} latLng
      */
-    function update20mCircle(map, latLng) {
+    function updateCircle(map, latLng) {
         const googleMaps = /** @type {WindowWithGoogle} */ (window).google.maps;
         if (!googleMaps) return;
 
@@ -78,7 +78,7 @@
                 fillOpacity: 0.15,
                 map,
                 center: latLng,
-                radius: 20, // 20m
+                radius: 80,
                 clickable: false,
             });
         } else {
@@ -529,8 +529,8 @@
             nativeMap.setCenter(target);
             const zoom = nativeMap.getZoom();
             nativeMap.setZoom(Math.max(zoom, 16));
-            // ピン移動に合わせて円を描画・更新
-            update20mCircle(nativeMap, target);
+            // ピン移動に合わせて描画・更新
+            updateCircle(nativeMap, target);
         }
 
         if (submitComponent) {
@@ -627,11 +627,11 @@
         const parsed = parseCoordinates(currentCoord);
         if (!parsed) return;
 
-        // 画面操作等で座標が変わった場合にも20m円を描画更新
+        // 画面操作等で座標が変わった場合にも描画更新
         const submitComponent = findRawSubmitComponent();
         const nativeMap = resolveMapFromComponent(submitComponent);
         if (nativeMap) {
-            update20mCircle(nativeMap, parsed);
+            updateCircle(nativeMap, parsed);
         }
 
         if (isProgrammaticMove || lastHistoryNavigationTarget) {
@@ -673,7 +673,7 @@
                 const submitComponent = findRawSubmitComponent();
                 const nativeMap = resolveMapFromComponent(submitComponent);
                 if (nativeMap) {
-                    update20mCircle(nativeMap, parsed);
+                    updateCircle(nativeMap, parsed);
                 }
             }
         }
