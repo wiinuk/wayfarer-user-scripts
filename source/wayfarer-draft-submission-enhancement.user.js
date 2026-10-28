@@ -982,7 +982,7 @@
     // --- DOM監視と実行制御 ---
 
     const observer = new MutationObserver(() => {
-        const mapContainer = /** @type {HTMLElement} */ (
+        const mapContainer = /** @type {HTMLElement | null} */ (
             document.querySelector("app-submit-wayspot-map")
         );
         if (mapContainer) {
