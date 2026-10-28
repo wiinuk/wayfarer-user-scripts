@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.23
+// @version      1.24
 // @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンマーカーの描画。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
@@ -477,6 +477,83 @@
     }
 
     /**
+     * @typedef {object} ReactFiberNode
+     * @property {ReactFiberNode | null} [return]
+     * @property {unknown} [memoizedProps]
+     * @property {unknown} [ref]
+     */
+
+    /**
+     * @typedef {object} ReactSubmitMap
+     * @property {GoogleMap} map
+     * @property {(location: LatLng) => unknown} onLocationSelected
+     */
+
+    /**
+     * 新しい提出画面のReactコンポーネントから地図と位置選択コールバックを取得する
+     * @returns {ReactSubmitMap | null}
+     */
+    function findReactSubmitMap() {
+        const container = document.querySelector(
+            '[data-testid="base-map-container"]'
+        );
+        if (!container) return null;
+
+        const fiberKey = Object.keys(container).find((key) =>
+            key.startsWith("__reactFiber$")
+        );
+        if (!fiberKey) return null;
+
+        const containerProperties = /** @type {Record<string, unknown>} */ (
+            /** @type {unknown} */ (container)
+        );
+        let fiber = /** @type {ReactFiberNode | null} */ (
+            containerProperties[fiberKey]
+        );
+        /** @type {GoogleMap | null} */
+        let map = null;
+        /** @type {((location: LatLng) => unknown) | null} */
+        let onLocationSelected = null;
+
+        while (fiber) {
+            const props = fiber.memoizedProps;
+            if (props && typeof props === "object") {
+                const ref = fiber.ref;
+                const refValue =
+                    ref && typeof ref === "object" && "current" in ref
+                        ? /** @type {Record<string, unknown>} */ (ref)[
+                              "current"
+                          ]
+                        : null;
+
+                if (
+                    refValue &&
+                    typeof refValue === "object" &&
+                    "getMap" in refValue &&
+                    typeof refValue.getMap === "function"
+                ) {
+                    const candidateMap = refValue.getMap();
+                    if (looksLikeGoogleMap(candidateMap)) {
+                        map = candidateMap;
+                    }
+                }
+
+                const callback = /** @type {Record<string, unknown>} */ (props)[
+                    "onLocationSelected"
+                ];
+                if (typeof callback === "function") {
+                    onLocationSelected =
+                        /** @type {(location: LatLng) => unknown} */ (callback);
+                }
+            }
+
+            fiber = fiber.return || null;
+        }
+
+        return map && onLocationSelected ? { map, onLocationSelected } : null;
+    }
+
+    /**
      * @typedef {object} CircleOptions
      * @property {LatLng} [center]
      * @property {number} [radius]
@@ -521,8 +598,10 @@
         if (!googleMaps)
             throw new Error("Google Maps APIが読み込まれていません。");
 
+        const reactSubmitMap = findReactSubmitMap();
         const submitComponent = findRawSubmitComponent();
-        const nativeMap = resolveMapFromComponent(submitComponent);
+        const nativeMap =
+            reactSubmitMap?.map || resolveMapFromComponent(submitComponent);
         const target = new googleMaps.LatLng(lat, lng);
 
         if (nativeMap) {
@@ -530,7 +609,12 @@
             const zoom = nativeMap.getZoom();
             nativeMap.setZoom(Math.max(zoom, 16));
             // ピン移動に合わせて描画・更新
-            updateCircle(nativeMap, target);
+            updateCircle(nativeMap, { lat, lng });
+        }
+
+        if (reactSubmitMap) {
+            reactSubmitMap.onLocationSelected({ lat, lng });
+            return;
         }
 
         if (submitComponent) {
@@ -620,6 +704,32 @@
     let observedElement = null;
 
     /**
+     * 新旧提出画面から表示中の座標文字列を取得する
+     * @param {Element} root
+     */
+    function findDisplayedCoordinate(root) {
+        const legacyCoordinate = root.querySelector(".submit-coordinates-text");
+        if (legacyCoordinate) {
+            return (legacyCoordinate.textContent || "").trim();
+        }
+
+        const walker = document.createTreeWalker(
+            root,
+            NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT
+        );
+        let node = walker.nextNode();
+        while (node) {
+            const text = (node.textContent || "").trim();
+            if (/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(text)) {
+                return text;
+            }
+            node = walker.nextNode();
+        }
+
+        return "";
+    }
+
+    /**
      * @param {string} currentCoord
      */
     function handleCoordChange(currentCoord) {
@@ -628,8 +738,10 @@
         if (!parsed) return;
 
         // 画面操作等で座標が変わった場合にも描画更新
+        const reactSubmitMap = findReactSubmitMap();
         const submitComponent = findRawSubmitComponent();
-        const nativeMap = resolveMapFromComponent(submitComponent);
+        const nativeMap =
+            reactSubmitMap?.map || resolveMapFromComponent(submitComponent);
         if (nativeMap) {
             updateCircle(nativeMap, parsed);
         }
@@ -650,19 +762,22 @@
     }
 
     function setupCoordObserver() {
-        const targetElement = document.querySelector(
-            ".submit-coordinates-text"
+        const mapRoot = document.querySelector(
+            '[data-testid="submit-wayspot-map"]'
         );
+        const root =
+            mapRoot?.closest("section") ||
+            document.querySelector("app-submit-wayspot-map");
 
-        if (!targetElement) return;
-        if (coordObserver && observedElement === targetElement) return;
+        if (!root) return;
+        if (coordObserver && observedElement === root) return;
 
         if (coordObserver) {
             coordObserver.disconnect();
         }
 
-        observedElement = targetElement;
-        lastObservedCoord = (targetElement.textContent || "").trim();
+        observedElement = root;
+        lastObservedCoord = findDisplayedCoordinate(root);
 
         if (lastObservedCoord) {
             const parsed = parseCoordinates(lastObservedCoord);
@@ -670,8 +785,11 @@
                 if (historyStack.length === 0) {
                     pushHistory(parsed);
                 }
+                const reactSubmitMap = findReactSubmitMap();
                 const submitComponent = findRawSubmitComponent();
-                const nativeMap = resolveMapFromComponent(submitComponent);
+                const nativeMap =
+                    reactSubmitMap?.map ||
+                    resolveMapFromComponent(submitComponent);
                 if (nativeMap) {
                     updateCircle(nativeMap, parsed);
                 }
@@ -679,14 +797,14 @@
         }
 
         coordObserver = new MutationObserver(() => {
-            const currentCoord = (targetElement.textContent || "").trim();
+            const currentCoord = findDisplayedCoordinate(root);
             if (currentCoord && currentCoord !== lastObservedCoord) {
                 lastObservedCoord = currentCoord;
                 handleCoordChange(currentCoord);
             }
         });
 
-        coordObserver.observe(targetElement, {
+        coordObserver.observe(root, {
             childList: true,
             characterData: true,
             subtree: true,
@@ -957,9 +1075,17 @@
                     }
                 }
 
-                const saveBtn = /** @type {HTMLButtonElement | null} */ (
-                    document.querySelector("button.save-draft-button")
-                );
+                const saveBtn =
+                    /** @type {HTMLButtonElement | null} */ (
+                        document.querySelector(
+                            "button.save-draft-button, [data-testid='save-draft-button']"
+                        )
+                    ) ||
+                    Array.from(document.querySelectorAll("button")).find(
+                        (button) =>
+                            button.textContent?.trim() === "下書きとして保存"
+                    ) ||
+                    null;
 
                 if (saveBtn) {
                     saveBtn.click();
@@ -982,9 +1108,13 @@
     // --- DOM監視と実行制御 ---
 
     const observer = new MutationObserver(() => {
-        const mapContainer = /** @type {HTMLElement | null} */ (
-            document.querySelector("app-submit-wayspot-map")
-        );
+        const mapContainer =
+            /** @type {HTMLElement | null} */ (
+                document.querySelector('[data-testid="base-map-container"]')
+            ) ||
+            /** @type {HTMLElement | null} */ (
+                document.querySelector("app-submit-wayspot-map")
+            );
         if (mapContainer) {
             createInputUI(mapContainer);
         }
