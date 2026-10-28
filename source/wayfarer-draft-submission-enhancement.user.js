@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
-// @version      1.24
+// @version      1.25
 // @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンマーカーの描画。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
