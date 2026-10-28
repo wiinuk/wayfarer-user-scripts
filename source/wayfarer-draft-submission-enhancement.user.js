@@ -981,14 +981,39 @@
     // --- フォーム入力・Angular連携処理 ---
 
     /**
-     * @param {HTMLTextAreaElement} element
+     * @param {HTMLTextAreaElement | HTMLInputElement | HTMLSelectElement} element
      * @param {string} value
      */
     function setInputValue(element, value) {
         if (!element) return;
-        element.value = value;
-        element.dispatchEvent(new Event("input", { bubbles: true }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
+
+        const valueSetter = Object.getOwnPropertyDescriptor(
+            element,
+            "value"
+        )?.set;
+        const prototype = Object.getPrototypeOf(element);
+        const prototypeValueSetter = Object.getOwnPropertyDescriptor(
+            prototype,
+            "value"
+        )?.set;
+
+        if (
+            valueSetter &&
+            prototypeValueSetter &&
+            valueSetter !== prototypeValueSetter
+        ) {
+            prototypeValueSetter.call(element, value);
+        } else if (valueSetter) {
+            valueSetter.call(element, value);
+        } else {
+            element.value = value;
+        }
+
+        if (element instanceof HTMLSelectElement) {
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+        } else {
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+        }
     }
 
     /**
@@ -1047,7 +1072,7 @@
                         document.getElementById("custom-coord-input-field")
                     );
                     if (coordInput) {
-                        coordInput.value = `${data.lat}, ${data.lng}`;
+                        setInputValue(coordInput, `${data.lat}, ${data.lng}`);
                     }
                 } catch (e) {
                     console.warn("座標の設定を再試行します", e);
