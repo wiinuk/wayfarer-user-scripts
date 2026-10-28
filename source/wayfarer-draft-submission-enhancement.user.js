@@ -859,6 +859,11 @@
 
     // --- 手動座標入力UI ---
 
+    /** @type {HTMLElement | null} */
+    let inputUIMapContainer = null;
+    let inputUIOriginalPosition = "";
+    let inputUIChangedMapPosition = false;
+
     /**
      * @param {HTMLElement} mapContainer
      */
@@ -970,7 +975,11 @@
         container.appendChild(input);
         container.appendChild(btn);
 
-        if (getComputedStyle(mapContainer).position === "static") {
+        inputUIMapContainer = mapContainer;
+        inputUIOriginalPosition = mapContainer.style.position;
+        inputUIChangedMapPosition =
+            getComputedStyle(mapContainer).position === "static";
+        if (inputUIChangedMapPosition) {
             mapContainer.style.position = "relative";
         }
         mapContainer.appendChild(container);
@@ -1033,13 +1042,27 @@
 
     /**
      * SPAのページ遷移完了を監視してタブを閉じる
+     * @type {ReturnType<typeof setInterval> | null}
      */
-    function waitForNavigationAndClose() {
-        const initialUrl = window.location.href;
+    let navigationCloseInterval = null;
+    /** @type {string | null} */
+    let navigationCloseInitialUrl = null;
 
-        const checkInterval = setInterval(() => {
-            if (window.location.href !== initialUrl) {
-                clearInterval(checkInterval);
+    function clearNavigationCloseCheck() {
+        if (navigationCloseInterval !== null) {
+            clearInterval(navigationCloseInterval);
+            navigationCloseInterval = null;
+            navigationCloseInitialUrl = null;
+        }
+    }
+
+    function waitForNavigationAndClose() {
+        clearNavigationCloseCheck();
+        navigationCloseInitialUrl = window.location.href;
+
+        navigationCloseInterval = setInterval(() => {
+            if (window.location.href !== navigationCloseInitialUrl) {
+                clearNavigationCloseCheck();
                 window.close();
             }
         }, 300);
@@ -1132,7 +1155,66 @@
 
     // --- DOM監視と実行制御 ---
 
-    const observer = new MutationObserver(() => {
+    let targetPageActive = false;
+
+    function cleanupTargetPage() {
+        if (coordObserver) {
+            coordObserver.disconnect();
+            coordObserver = null;
+        }
+        observedElement = null;
+
+        const inputUI = document.getElementById("custom-coord-input-container");
+        if (inputUI) inputUI.remove();
+        if (
+            inputUIMapContainer &&
+            inputUIChangedMapPosition &&
+            inputUIMapContainer.style.position === "relative"
+        ) {
+            inputUIMapContainer.style.position = inputUIOriginalPosition;
+        }
+        inputUIMapContainer = null;
+        inputUIOriginalPosition = "";
+        inputUIChangedMapPosition = false;
+        removeLoadingGuard();
+
+        if (currentCircle) {
+            currentCircle.setMap(null);
+            currentCircle = null;
+        }
+
+        historyStack.length = 0;
+        historyIndex = -1;
+        isProgrammaticMove = false;
+        lastHistoryNavigationTarget = null;
+        lastObservedCoord = "";
+
+        if (navigationCloseInterval !== null) {
+            const shouldClose =
+                window.location.href !== navigationCloseInitialUrl;
+            clearNavigationCloseCheck();
+            if (shouldClose) window.close();
+        }
+    }
+
+    function handlePageChanges() {
+        const isTargetPage =
+            window.location.origin === "https://wayfarer.scopely.com" &&
+            window.location.pathname === "/submit/new";
+
+        if (!isTargetPage) {
+            if (targetPageActive) {
+                targetPageActive = false;
+                cleanupTargetPage();
+            }
+            return;
+        }
+
+        if (!targetPageActive) {
+            targetPageActive = true;
+            autoFillProcessed = false;
+        }
+
         const mapContainer =
             /** @type {HTMLElement | null} */ (
                 document.querySelector('[data-testid="base-map-container"]')
@@ -1145,7 +1227,12 @@
         }
         setupCoordObserver();
         processHashData();
-    });
+    }
+
+    const observer = new MutationObserver(handlePageChanges);
 
     observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("popstate", handlePageChanges);
+    window.addEventListener("hashchange", handlePageChanges);
+    handlePageChanges();
 })();
