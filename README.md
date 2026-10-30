@@ -29,3 +29,9 @@ Wayfarer 活動をサポートする UserScript を置いています。無保�
 [インストール](../../main/source/wayfarer-nominations-screenshot.user.js)
 
 Wayfarer 申請候補の連続スクリーンショット画像を作成するスクリプト。
+
+## wayfarer-submission-open-in
+
+[インストール](../../raw/main/source/wayfarer-submission-open-in.user.js)
+
+Wayfarer の申請詳細ページに、候補のタイトルと座標を指定して外部URLを開くボタンを追加するスクリプト。
