@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Submission Open-In
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Wayfarerの申請詳細ページから候補の位置を開くリンクを追加
 // @author       You
 // @match        https://wayfarer.scopely.com/submit
@@ -28,13 +28,11 @@
             return;
         }
 
-        const title =
-            page
-                .querySelector(
-                    '[data-testid="submission-details-title-card"] h2'
-                )
-                ?.textContent?.trim() ??
-            page.querySelector("h2")?.textContent?.trim();
+        const titleElement =
+            page.querySelector(
+                '[data-testid="submission-details-title-card"] h2'
+            ) ?? page.querySelector("h2");
+        const title = titleElement?.textContent?.trim();
         const coordinateElement = [...page.querySelectorAll("*")].find(
             (element) =>
                 element.children.length === 0 &&
@@ -83,8 +81,8 @@
         }
 
         link.href = url;
-        if (coordinateElement.nextElementSibling !== link) {
-            coordinateElement.after(link);
+        if (titleElement && titleElement.nextElementSibling !== link) {
+            titleElement.after(link);
         }
     }
 
