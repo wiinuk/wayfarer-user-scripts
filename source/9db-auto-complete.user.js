@@ -47,12 +47,12 @@
 
         let currentIntervalMs = 100;
         const maxIntervalMs = 1000;
-        while (true) {
-            const e = getElement();
-            if (e) return e;
+        let e;
+        while ((e = getElement()) == null) {
             await sleep(currentIntervalMs);
             currentIntervalMs = Math.min(maxIntervalMs, currentIntervalMs * 2);
         }
+        return e;
     }
     const classNames = Object.freeze({
         completed: "-completed",
