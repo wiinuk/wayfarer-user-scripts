@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Submission Open-In
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Wayfarerの申請詳細ページから候補の位置を開くリンクを追加
 // @author       You
+// @match        https://wayfarer.scopely.com/submit
 // @match        https://wayfarer.scopely.com/submit/submission/*
 // @grant        none
 // @run-at       document-idle
