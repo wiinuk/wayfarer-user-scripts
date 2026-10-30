@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9db map - auto complete
 // @namespace    http://tampermonkey.net/
-// @version      2025-10-19
+// @version      2026-10-30
 // @description  try to take over the world!
 // @author       You
 // @match        https://9db.jp/pokemongo/map
@@ -113,21 +113,79 @@
         }, 500);
     }
 
+    /**
+     * @typedef {{ genre?: "gym" | "pokestop"; close?: boolean | string }} UrlOptions
+     */
+    /**
+     * @param {string} encodedOptions
+     * @returns {UrlOptions}
+     */
+    function parseUrlOptions(encodedOptions) {
+        if (encodedOptions === "") return {};
+
+        /** @type {unknown} */
+        let parsed;
+        try {
+            parsed = JSON.parse(encodedOptions);
+        } catch (error) {
+            console.error("Failed to parse URL options:", error);
+            return {};
+        }
+
+        if (
+            typeof parsed !== "object" ||
+            parsed === null ||
+            Array.isArray(parsed)
+        ) {
+            console.error("URL options must be a JSON object.");
+            return {};
+        }
+
+        /** @type {UrlOptions} */
+        const options = {};
+        if ("genre" in parsed) {
+            if (parsed.genre === "gym" || parsed.genre === "pokestop") {
+                options.genre = parsed.genre;
+            } else {
+                console.error(
+                    'URL option "genre" must be "gym" or "pokestop".'
+                );
+            }
+        }
+        if ("close" in parsed) {
+            if (typeof parsed.close === "boolean") {
+                options.close = parsed.close;
+            } else if (typeof parsed.close === "string") {
+                options.close = parsed.close !== "false";
+            } else {
+                console.error(
+                    'URL option "close" must be a boolean or string.'
+                );
+            }
+        }
+        return options;
+    }
+
     const initialUrl = window.location.href;
 
     async function setupAutoComplete() {
         const hash = new URL(initialUrl).hash;
         console.debug(initialUrl);
 
-        const [initialLat = "", initialLng = "", _zoom, title = ""] = hash
-            .replace(/^#/, "")
-            .split(",")
-            .map(decodeURIComponent);
+        const [
+            initialLat = "",
+            initialLng = "",
+            _zoom,
+            title = "",
+            encodedOptions = "",
+        ] = hash.replace(/^#/, "").split(",").map(decodeURIComponent);
+        const options = parseUrlOptions(encodedOptions);
 
         console.debug("auto complete:", {
             title,
             lat: initialLat,
             lng: initialLng,
+            options,
         });
         if (title == null) return;
 
@@ -166,10 +224,42 @@
         });
         observer.observe(spotForm);
 
+        /** @type {HTMLInputElement | null} */
+        let submitInput = null;
+        if (options.close) {
+            submitInput = /** @type {HTMLInputElement} */ (
+                await waitElement("#spot_edit_area input.submit")
+            );
+            let submitRequested = false;
+            submitInput.addEventListener("click", () => {
+                submitRequested = true;
+            });
+
+            const closeObserver = new MutationObserver(() => {
+                if (
+                    !submitRequested ||
+                    getComputedStyle(spotForm).display !== "none"
+                ) {
+                    return;
+                }
+                closeObserver.disconnect();
+                window.close();
+            });
+            closeObserver.observe(spotForm, {
+                attributes: true,
+                attributeFilter: ["class", "style"],
+            });
+        }
+
+        if (options.genre != null) {
+            await openSpotForm(options.genre);
+        }
+
         setValues();
+        submitInput?.click();
     }
     /**
-     * @param {Readonly<{ classNames: readonly string[]; imgSrc: string; imgAlt: string; spotGenre: string; shortcutKey: string; }>} options
+     * @param {Readonly<{ classNames: readonly string[]; imgSrc: string; imgAlt: string; spotGenre: "gym" | "pokestop"; shortcutKey: string; }>} options
      */
     async function addSpotButton(options) {
         const addSpotButton = document.createElement("div");
@@ -182,17 +272,8 @@
         img.src = options.imgSrc;
         img.alt = options.imgAlt;
         addSpotButton.appendChild(img);
-        addSpotButton.addEventListener("click", async () => {
-            const addSpot = /** @type {HTMLElement} */ (
-                await waitElement("#add_spot")
-            );
-            addSpot.click();
-            const addSpotImg = /** @type {HTMLElement} */ (
-                await waitElement(
-                    `#add_spot_select .open_spot_form[data-genre=${options.spotGenre}]`
-                )
-            );
-            addSpotImg.click();
+        addSpotButton.addEventListener("click", () => {
+            void openSpotForm(options.spotGenre);
         });
 
         const addSpot = await waitElement("#add_spot");
@@ -207,6 +288,21 @@
                 addSpotButton.click();
             }
         });
+    }
+    /**
+     * @param {"gym" | "pokestop"} spotGenre
+     */
+    async function openSpotForm(spotGenre) {
+        const addSpot = /** @type {HTMLElement} */ (
+            await waitElement("#add_spot")
+        );
+        addSpot.click();
+        const addSpotImg = /** @type {HTMLElement} */ (
+            await waitElement(
+                `#add_spot_select .open_spot_form[data-genre=${spotGenre}]`
+            )
+        );
+        addSpotImg.click();
     }
     async function addGymButton() {
         return await addSpotButton({
