@@ -226,12 +226,24 @@
             shortcutKey: "s",
         });
     }
+    async function setupEnterToSubmit() {
+        const submitInput = /** @type {HTMLInputElement} */ (
+            await waitElement("#spot_edit_area input.submit")
+        );
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                submitInput.click();
+            }
+        });
+    }
     ready(async () => {
         addStyle();
 
         await Promise.all([
             addGymButton(),
             addStopButton(),
+            setupEnterToSubmit(),
             setupAutoComplete(),
         ]);
     });
