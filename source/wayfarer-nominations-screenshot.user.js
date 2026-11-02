@@ -65,9 +65,9 @@
         let minAspectRatioDiff = Infinity;
 
         for (let rows = 1; rows <= tileCount; rows++) {
-            let cols = Math.ceil(tileCount / rows);
-            let actualAspectRatio = (cols * tileWidth) / (rows * tileHeight);
-            let aspectRatioDiff = Math.abs(
+            const cols = Math.ceil(tileCount / rows);
+            const actualAspectRatio = (cols * tileWidth) / (rows * tileHeight);
+            const aspectRatioDiff = Math.abs(
                 actualAspectRatio - expectedAspectRatio
             );
 
@@ -91,6 +91,8 @@
         const options = { video: true, preferCurrentTab: true };
         const stream = await navigator.mediaDevices.getDisplayMedia(options);
         const track = stream.getVideoTracks()[0];
+        if (!track) return error`No video track available`;
+
         try {
             const imageCapture = new /** @type {any} */ (
                 globalThis
@@ -128,7 +130,7 @@
         return new Promise((resolve) => {
             element.scrollIntoView(options);
             const observer = new IntersectionObserver((entries) => {
-                if (entries[0].isIntersecting) {
+                if (entries[0]?.isIntersecting) {
                     observer.disconnect();
                     resolve();
                 }
@@ -147,7 +149,7 @@
         if (left === element.scrollLeft && top === element.scrollTop) {
             return Promise.resolve();
         }
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve, _reject) => {
             const onScrollEnd = () => {
                 element.removeEventListener("scrollend", onScrollEnd);
                 resolve();
@@ -188,7 +190,7 @@
             const observer = new IntersectionObserver(
                 (entries) => {
                     const entry = entries[0];
-                    if (entry.isIntersecting) {
+                    if (entry?.isIntersecting) {
                         resolve(entry.intersectionRatio === 1);
                         observer.disconnect();
                     }
@@ -294,13 +296,16 @@
         const itemHeight = /** @type {HTMLElement} */ (
             listElement.querySelectorAll("app-submissions-list-item")[0]
         ).offsetHeight;
-        const { scrollHeight, clientWidth: itemWidth } = listElement;
+        const { clientWidth: itemWidth } = listElement;
 
         const listWrapper =
             document.querySelector(".cdk-virtual-scroll-content-wrapper") ??
             error`list wrapper element not found`;
+
         /** @type {number} */
-        const allItemCount = listWrapper["__ngContext__"][3][26].length;
+        const allItemCount = /** @type {any} */ (listWrapper)[
+            "__ngContext__"
+        ][3][26].length;
 
         const result = await showConfigDialog({
             imageCount: defaultImageCount,
@@ -432,7 +437,7 @@
      * @returns {Promise<CaptureConfig | "Canceled">} - 更新された設定、またはキャンセルされた場合は "Canceled"
      */
     function showConfigDialog(initialConfig) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve, _reject) => {
             // ダイアログを作成
             const dialog = document.createElement("dialog");
             dialog.innerHTML = `
