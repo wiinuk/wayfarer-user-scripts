@@ -95,6 +95,7 @@
         if (!track) return error`No video track available`;
 
         try {
+            track.contentHint = "detail";
             const imageCapture = new /** @type {any} */ (
                 globalThis
             ).ImageCapture(track);
@@ -123,6 +124,8 @@
      * @property {number} tileCountY
      * @property {number} itemWidth
      * @property {number} itemHeight
+     * @property {number} scaleX
+     * @property {number} scaleY
      */
 
     /**
@@ -251,12 +254,15 @@
             tileCountY,
             itemWidth,
             itemHeight,
+            scaleX,
+            scaleY,
         } = imageCaptureContext;
 
         const canvas = document.createElement("canvas");
-        canvas.width = itemWidth;
-        canvas.height = itemHeight;
+        canvas.width = Math.round(itemWidth * scaleX);
+        canvas.height = Math.round(itemHeight * scaleY);
         const context = assertNonNull(canvas.getContext("2d"));
+        context.imageSmoothingEnabled = false;
 
         // 白で塗りつぶす
         context.fillStyle = "white";
@@ -268,12 +274,14 @@
         // キャンバスに画面をキャプチャ
         const rect = itemElement.getBoundingClientRect();
         const bitmap = await track.grabFrame();
+        const sourceX = Math.round(rect.left * scaleX);
+        const sourceY = Math.round(rect.top * scaleY);
         context.drawImage(
             bitmap,
-            rect.left,
-            rect.top,
-            itemWidth,
-            itemHeight,
+            sourceX,
+            sourceY,
+            canvas.width,
+            canvas.height,
             0,
             0,
             canvas.width,
@@ -284,12 +292,14 @@
         const itemIndexPerImage = itemIndex % itemCountPerImage;
         const itemIndexX = Math.floor(itemIndexPerImage / tileCountY);
         const itemIndexY = itemIndexPerImage % tileCountY;
+        const destinationX = itemIndexX * canvas.width;
+        const destinationY = itemIndexY * canvas.height;
         imageContext.drawImage(
             canvas,
-            itemIndexX * itemWidth,
-            itemIndexY * itemHeight,
-            itemWidth,
-            itemHeight
+            destinationX,
+            destinationY,
+            canvas.width,
+            canvas.height
         );
     }
 
@@ -336,6 +346,19 @@
 
         await loadItemsThrough(listElement, rangeEndNth);
 
+        const scaleFrame = await track.grabFrame();
+        const scaleX = scaleFrame.width / window.innerWidth;
+        const scaleY = scaleFrame.height / window.innerHeight;
+        scaleFrame.close();
+        if (
+            !Number.isFinite(scaleX) ||
+            !Number.isFinite(scaleY) ||
+            scaleX <= 0 ||
+            scaleY <= 0
+        ) {
+            return error`could not determine capture resolution`;
+        }
+
         /** 画像1枚ごとのリストアイテム数 */
         const itemCountPerImage = Math.ceil(itemCount / imageCount);
         const [tileCountX, tileCountY] = getTileCount(
@@ -351,6 +374,8 @@
         });
 
         let itemIndex = 0;
+        const outputTileWidth = Math.round(itemWidth * scaleX);
+        const outputTileHeight = Math.round(itemHeight * scaleY);
         /** @type {ListItemsCaptureContext} */
         const itemsContext = {
             previousItemElement: null,
@@ -367,9 +392,10 @@
         }
         for (let imageIndex = 0; imageIndex < imageCount; imageIndex++) {
             const imageCanvas = document.createElement("canvas");
-            imageCanvas.width = itemWidth * tileCountX;
-            imageCanvas.height = itemHeight * tileCountY;
+            imageCanvas.width = outputTileWidth * tileCountX;
+            imageCanvas.height = outputTileHeight * tileCountY;
             const imageContext = assertNonNull(imageCanvas.getContext("2d"));
+            imageContext.imageSmoothingEnabled = false;
 
             /** @type {ImageCaptureContext} */
             const captureContext = {
@@ -383,6 +409,8 @@
                 tileCountY,
                 itemHeight,
                 itemWidth,
+                scaleX,
+                scaleY,
             };
             console.log(captureContext);
 
