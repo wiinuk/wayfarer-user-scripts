@@ -10,6 +10,6 @@
 
 ### 単独の `.user.js` ファイル
 
-- ファイルを変更した場合は、`node --check` を実行し、JavaScriptの型チェック（例: `npx tsc --allowJs --checkJs --noEmit --target ES2020 --lib DOM,ES2020 --skipLibCheck <file>`）を行ってください。
+- ファイルを変更した場合は、`node --check` を実行し、JavaScriptの型チェック（例: `npx tsc --allowJs --checkJs --noEmit --target ES2020 --lib DOM,ES2020 --skipLibCheck --strict --noUncheckedIndexedAccess --noPropertyAccessFromIndexSignature --pretty false <file>`）を行ってください。
 - `npm test` コマンドは使えません。テストはありません。
 - `npm build` コマンドは使えません。ビルド処理はありません。
