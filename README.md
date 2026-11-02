@@ -35,3 +35,9 @@ Wayfarer 申請候補の連続スクリーンショット画像を作成する�
 [インストール](../../raw/main/source/wayfarer-submission-open-in.user.js)
 
 Wayfarer の申請詳細ページに、候補のタイトルと座標を指定して外部URLを開くボタンを追加するスクリプト。
+
+## google-photos-time-search
+
+[インストール](../../raw/main/source/google-photos-time-search.user.js)
+
+Google フォトに撮影時刻の検索欄を追加するスクリプト。入力した ISO 8601 の日時の日付で写真を検索し、写真の情報ペインに表示される撮影時刻を二分探索して最も近い写真までスクロールします。その日に写真がない場合は検索を終了します。「デバッグ情報をコピー」ボタンから、検索状態やエラーをコピーできます（検索欄の文字列と入力日時を含み、写真IDやURLは含みません）。
