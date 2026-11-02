@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Nominations Screenshot
 // @namespace    https://github.com/wiinuk/wayfarer-user-scripts
-// @version      1.3
+// @version      1.4
 // @description  Save screenshots of multiple nominations in one image.
 // @author       Wiinuk
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/submit*
 // @grant        none
+// @run-at       document-idle
 // ==/UserScript==
 
 //spell-checker: ignore wiinuk scrollend
@@ -106,6 +107,9 @@
      * @typedef {Object} ListItemsCaptureContext
      * @property {HTMLElement | null} previousItemElement
      * @property {HTMLElement} listElement
+     * @property {HTMLElement} scrollElement
+     * @property {string} itemSelector
+     * @property {number} totalItemCount
      */
     /**
      * @typedef {Object} ImageCaptureContext
@@ -208,9 +212,15 @@
      */
     async function moveToNextItemElement(itemsContext) {
         // 前の要素の次を取得
-        const itemElement =
-            itemsContext.previousItemElement?.nextElementSibling ??
-            itemsContext.listElement.querySelector("app-submissions-list-item");
+        const nextElement =
+            itemsContext.previousItemElement?.nextElementSibling;
+        const itemElement = itemsContext.previousItemElement
+            ? nextElement?.matches(itemsContext.itemSelector)
+                ? nextElement
+                : null
+            : itemsContext.listElement.querySelector(
+                  itemsContext.itemSelector
+              );
         if (!(itemElement instanceof HTMLElement)) return null;
 
         itemsContext.previousItemElement = itemElement;
@@ -285,34 +295,30 @@
 
     /**
      * @param {Track} track
-     * @param {HTMLElement} listElement
+     * @param {ListItemsCaptureContext} listElement
      */
     async function captureElementWithTrack(track, listElement) {
         // キャプチャ中を知らせる通知バーの追加による要素のサイズ変更が収まるのを待つ
         await sleep(1000);
 
+        const firstItem = listElement.listElement.querySelector(
+            listElement.itemSelector
+        );
+        if (!(firstItem instanceof HTMLElement))
+            return error`list item element not found`;
+
         // リストアイテムを何枚の画像に分割するか
         const defaultImageCount = 4;
-        const itemHeight = /** @type {HTMLElement} */ (
-            listElement.querySelectorAll("app-submissions-list-item")[0]
-        ).offsetHeight;
-        const { clientWidth: itemWidth } = listElement;
-
-        const listWrapper =
-            document.querySelector(".cdk-virtual-scroll-content-wrapper") ??
-            error`list wrapper element not found`;
-
-        /** @type {number} */
-        const allItemCount = /** @type {any} */ (listWrapper)[
-            "__ngContext__"
-        ][3][26].length;
+        const firstItemRect = firstItem.getBoundingClientRect();
+        const itemHeight = firstItemRect.height;
+        const itemWidth = firstItemRect.width;
 
         const result = await showConfigDialog({
             imageCount: defaultImageCount,
             imageRatioX: 4,
             imageRatioY: 3,
             rangeStartNth: 1,
-            rangeEndNth: allItemCount,
+            rangeEndNth: listElement.totalItemCount,
         });
         if (result === "Canceled") return;
 
@@ -328,6 +334,8 @@
         const skipCount = rangeStartNth - 1;
         const itemCount = rangeEndNth - rangeStartNth + 1;
 
+        await loadItemsThrough(listElement, rangeEndNth);
+
         /** 画像1枚ごとのリストアイテム数 */
         const itemCountPerImage = Math.ceil(itemCount / imageCount);
         const [tileCountX, tileCountY] = getTileCount(
@@ -337,13 +345,19 @@
         );
 
         // 一番上までスクロールして最初の要素を生成させる
-        await waitForScrollTo(listElement, { behavior: "instant", top: 0 });
+        await waitForScrollTo(listElement.scrollElement, {
+            behavior: "instant",
+            top: 0,
+        });
 
         let itemIndex = 0;
         /** @type {ListItemsCaptureContext} */
         const itemsContext = {
             previousItemElement: null,
-            listElement,
+            listElement: listElement.listElement,
+            scrollElement: listElement.scrollElement,
+            itemSelector: listElement.itemSelector,
+            totalItemCount: listElement.totalItemCount,
         };
         // 最初のアイテムまでスキップする
         for (let i = 0; i < skipCount; i++) {
@@ -414,13 +428,132 @@
         }
     }
     /**
-     * @param {HTMLElement} listElement
+     * @param {ListItemsCaptureContext} listElement
      */
     async function captureElement(listElement) {
-        await waitForScrollIntoView(listElement, { behavior: "instant" });
+        const firstItem = listElement.listElement.querySelector(
+            listElement.itemSelector
+        );
+        if (!(firstItem instanceof HTMLElement))
+            return error`list item element not found`;
+
+        await waitForScrollIntoView(firstItem, { behavior: "instant" });
         await withCurrentTabVideoTrack0((track) =>
             captureElementWithTrack(track, listElement)
         );
+    }
+
+    /**
+     * @param {ListItemsCaptureContext} listContext
+     * @param {number} requiredItemCount
+     */
+    async function loadItemsThrough(listContext, requiredItemCount) {
+        while (
+            listContext.listElement.querySelectorAll(
+                listContext.itemSelector
+            ).length < requiredItemCount
+        ) {
+            const previousCount = listContext.listElement.querySelectorAll(
+                listContext.itemSelector
+            ).length;
+            const loadMoreContainer = listContext.listElement.lastElementChild;
+            const loadMoreButton =
+                loadMoreContainer &&
+                !loadMoreContainer.matches(listContext.itemSelector)
+                    ? loadMoreContainer.querySelector("button")
+                    : null;
+            if (!(loadMoreButton instanceof HTMLButtonElement))
+                return error`load more button not found`;
+
+            await waitForScrollIntoView(loadMoreButton, {
+                behavior: "instant",
+            });
+            loadMoreButton.click();
+            await waitForMoreItems(listContext, previousCount);
+        }
+    }
+
+    /**
+     * @param {ListItemsCaptureContext} listContext
+     * @param {number} previousCount
+     * @returns {Promise<void>}
+     */
+    function waitForMoreItems(listContext, previousCount) {
+        if (
+            listContext.listElement.querySelectorAll(
+                listContext.itemSelector
+            ).length > previousCount
+        ) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve, reject) => {
+            const observer = new MutationObserver(() => {
+                if (
+                    listContext.listElement.querySelectorAll(
+                        listContext.itemSelector
+                    ).length > previousCount
+                ) {
+                    clearTimeout(timeoutId);
+                    observer.disconnect();
+                    resolve(undefined);
+                }
+            });
+            const timeoutId = setTimeout(() => {
+                observer.disconnect();
+                reject(new Error("Timed out while loading more submissions"));
+            }, 10000);
+            observer.observe(listContext.listElement, {
+                childList: true,
+                subtree: true,
+            });
+        });
+    }
+
+    /**
+     * @returns {ListItemsCaptureContext}
+     */
+    function findListItemsContext() {
+        const submissionsSection = document.querySelector(
+            '[data-testid="submit-submissions"]'
+        );
+        const firstSubmission = submissionsSection?.querySelector(
+            '[data-testid="managed-submission-card"]'
+        );
+
+        if (
+            submissionsSection instanceof HTMLElement &&
+            firstSubmission instanceof HTMLElement &&
+            firstSubmission.parentElement instanceof HTMLElement
+        ) {
+            const activeTab = [...document.querySelectorAll(
+                'button[aria-pressed="true"]'
+            )].find((button) => /\(\s*\d[\d,]*\s*\)/.test(button.textContent ?? ""));
+            const countText = activeTab?.textContent?.match(
+                /\(\s*(\d[\d,]*)\s*\)/
+            )?.[1];
+            const totalItemCount = countText
+                ? Number(countText.replace(/,/g, ""))
+                : NaN;
+            if (!Number.isSafeInteger(totalItemCount) || totalItemCount < 1)
+                return error`could not determine the submission count`;
+
+            const scrollElement = document.querySelector(
+                '[data-testid="app-route-scroll"]'
+            );
+            if (!(scrollElement instanceof HTMLElement))
+                return error`submission scroll element not found`;
+
+            return {
+                previousItemElement: null,
+                listElement: firstSubmission.parentElement,
+                scrollElement,
+                itemSelector: '[data-testid="managed-submission-card"]',
+                totalItemCount,
+            };
+        }
+
+        return error`submission list not found`;
     }
     /**
      * @typedef {Object} CaptureConfig
@@ -600,16 +733,15 @@
         const e = document.createElement("button");
         e.textContent = message;
         e.style.position = "fixed";
-        e.style.right = "0";
+        e.style.top = "80px";
+        e.style.right = "16px";
+        e.style.zIndex = "1000";
         document.body.appendChild(e);
         return e;
     }
 
-    const listItemSelector =
-        "body > app-root > app-wayfarer > div > mat-sidenav-container > mat-sidenav-content > div > app-submissions > div > div > div > div > app-submissions-list > div > cdk-virtual-scroll-viewport";
     appendButton("Capture").addEventListener("click", () => {
-        const e = document.body.querySelectorAll(listItemSelector)[0];
-        captureElement(e instanceof HTMLElement ? e : error`not found`).catch(
+        captureElement(findListItemsContext()).catch(
             (e) => console.error("キャプチャ中にエラーが発生しました:", e)
         );
     });
