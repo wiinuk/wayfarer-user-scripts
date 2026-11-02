@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Photos Time Search
 // @namespace    https://github.com/wiinuk/wayfarer-user-scripts
-// @version      1.0
+// @version      1.1
 // @description  撮影時刻を指定して最も近い写真までスクロールする
 // @author       Wiinuk
 // @match        https://photos.google.com/*
@@ -17,13 +17,15 @@
     const PHOTO_SELECTOR = 'a[href*="/photo/"]:not([href*="/top/photo/"])';
     let targetDateTime = 0;
     let debugStartedAt = 0;
-    /** @type {{targetTime: string|null, targetDate: string|null, phase: string, lastError: string|null, searchResultCount: number, inspectedPhotoIndexes: number[], events: Array<{elapsedMs: number, message: string}>}} */
+    /** @type {{targetTime: string|null, targetDate: string|null, phase: string, lastError: string|null, searchResultCount: number, collectionPasses: number, maxScrollTop: number, inspectedPhotoIndexes: number[], events: Array<{elapsedMs: number, message: string}>}} */
     const debugState = {
         targetTime: null,
         targetDate: null,
         phase: "待機中",
         lastError: null,
         searchResultCount: 0,
+        collectionPasses: 0,
+        maxScrollTop: 0,
         inspectedPhotoIndexes: [],
         events: [],
     };
@@ -123,7 +125,7 @@
               : "home-or-other";
 
         return {
-            scriptVersion: "1.0",
+            scriptVersion: "1.1",
             capturedAt: new Date().toISOString(),
             route,
             targetDate: debugState.targetDate,
@@ -139,6 +141,8 @@
                 'a[href*="/top/photo/"]'
             ).length,
             searchResultCount: debugState.searchResultCount,
+            collectionPasses: debugState.collectionPasses,
+            maxScrollTop: debugState.maxScrollTop,
             inspectedPhotoIndexes: debugState.inspectedPhotoIndexes,
             historyLength: history.length,
             events: debugState.events,
@@ -271,48 +275,166 @@
         return cards;
     }
 
-    async function loadPhotoResults() {
-        const firstCard = getPhotoCards()[0];
+    /**
+     * @param {string} href
+     */
+    function getPhotoId(href) {
+        return new URL(href, location.href).pathname.match(
+            /\/photo\/([^/]+)/
+        )?.[1];
+    }
+
+    /**
+     * Locate a photo in the virtualized results, scrolling the list as needed.
+     * @param {string} href
+     */
+    async function findPhotoCard(href) {
+        const photoId = getPhotoId(href);
+        if (!photoId) return null;
+
+        const findLoadedCard = () =>
+            getPhotoCards().find(
+                (card) => getPhotoId(card.href) === photoId
+            ) || null;
+        const alreadyLoaded = findLoadedCard();
+        if (alreadyLoaded) return alreadyLoaded;
+
+        let firstCard = getPhotoCards()[0];
         if (!firstCard) {
-            await delay(1500);
-            return [];
+            await waitUntil(
+                () => getPhotoCards().length > 0,
+                "検索結果の写真一覧が読み込まれませんでした。"
+            );
+            firstCard = getPhotoCards()[0];
         }
-
+        if (!firstCard) return null;
         const scrollArea = getScrollArea(firstCard);
-        if (!scrollArea) return getPhotoCards().map((card) => card.href);
+        if (!scrollArea) return null;
 
-        let previousCount = -1;
-        let stagnantBottomPasses = 0;
+        scrollArea.scrollTo(0, 0);
+        await delay(150);
         for (let pass = 0; pass < 1000; pass++) {
-            const cards = getPhotoCards();
+            const card = findLoadedCard();
+            if (card) return card;
+
             const maxScrollTop = Math.max(
                 0,
                 scrollArea.scrollHeight - scrollArea.clientHeight
             );
-            if (scrollArea.scrollTop >= maxScrollTop) {
-                if (cards.length === previousCount) {
+            if (scrollArea.scrollTop >= maxScrollTop) return null;
+            scrollArea.scrollTo(
+                0,
+                Math.min(
+                    scrollArea.scrollTop + scrollArea.clientHeight * 0.8,
+                    maxScrollTop
+                )
+            );
+            await delay(150);
+        }
+        return null;
+    }
+
+    async function loadPhotoResults() {
+        if (getPhotoCards().length === 0) await delay(1500);
+        const firstCard = getPhotoCards()[0];
+        if (!firstCard) return [];
+
+        const scrollArea = getScrollArea(firstCard);
+        if (!scrollArea) {
+            throw new Error("写真一覧のスクロール領域が見つかりません。");
+        }
+
+        /** @type {Map<string, string>} */
+        const photoHrefsById = new Map();
+        scrollArea.scrollTo(0, 0);
+        await delay(300);
+
+        let stagnantBottomPasses = 0;
+        let completed = false;
+        for (let pass = 0; pass < 1000; pass++) {
+            debugState.collectionPasses = pass + 1;
+            const scrollRect =
+                scrollArea === document.scrollingElement
+                    ? {
+                          top: 0,
+                          bottom: document.documentElement.clientHeight,
+                      }
+                    : scrollArea.getBoundingClientRect();
+            const visibleCards = getPhotoCards()
+                .map((card) => ({
+                    card,
+                    rect: card.getBoundingClientRect(),
+                }))
+                .filter(
+                    ({ rect }) =>
+                        rect.width > 0 &&
+                        rect.height > 0 &&
+                        rect.bottom > scrollRect.top &&
+                        rect.top < scrollRect.bottom
+                )
+                .sort(
+                    (first, second) =>
+                        first.rect.top - second.rect.top ||
+                        first.rect.left - second.rect.left
+                );
+
+            const previousCount = photoHrefsById.size;
+            for (const { card } of visibleCards) {
+                const photoId = getPhotoId(card.href);
+                if (photoId && !photoHrefsById.has(photoId)) {
+                    photoHrefsById.set(photoId, card.href);
+                }
+            }
+            debugState.searchResultCount = photoHrefsById.size;
+
+            const maxScrollTop = Math.max(
+                0,
+                scrollArea.scrollHeight - scrollArea.clientHeight
+            );
+            debugState.maxScrollTop = maxScrollTop;
+            if (scrollArea.scrollTop >= maxScrollTop - 1) {
+                if (photoHrefsById.size === previousCount) {
                     stagnantBottomPasses++;
                 } else {
                     stagnantBottomPasses = 0;
                 }
-                if (stagnantBottomPasses >= 3) break;
+                if (stagnantBottomPasses >= 5) {
+                    completed = true;
+                    break;
+                }
             } else {
                 stagnantBottomPasses = 0;
                 scrollArea.scrollTo(
                     0,
                     Math.min(
-                        scrollArea.scrollTop + scrollArea.clientHeight * 0.8,
+                        scrollArea.scrollTop + scrollArea.clientHeight * 0.6,
                         maxScrollTop
                     )
                 );
             }
-            previousCount = cards.length;
-            await delay(200);
+
+            if (pass % 10 === 0) {
+                setStatus(
+                    `写真一覧をスクロールして確認しています… (${photoHrefsById.size}枚)`
+                );
+            }
+            await delay(
+                scrollArea.scrollTop >=
+                    scrollArea.scrollHeight - scrollArea.clientHeight - 1
+                    ? 450
+                    : 250
+            );
         }
 
-        const hrefs = [...new Set(getPhotoCards().map((card) => card.href))];
+        if (!completed) {
+            throw new Error(
+                `写真一覧の走査が完了しませんでした（${photoHrefsById.size}枚確認）。`
+            );
+        }
+
+        const hrefs = [...photoHrefsById.values()];
         scrollArea.scrollTo(0, 0);
-        await delay(200);
+        await delay(300);
         return hrefs;
     }
 
@@ -349,15 +471,19 @@
      * @param {string} href
      */
     async function openPhotoAndReadTime(href) {
-        const card = getPhotoCards().find((element) => element.href === href);
+        setStatus("検索結果から写真を開いています…");
+        const card = await findPhotoCard(href);
         if (!card) {
-            throw new Error("検索結果の写真を再表示できませんでした。");
+            throw new Error("検索結果から対象の写真を見つけられませんでした。");
         }
 
         card.click();
+        const photoId = getPhotoId(href);
+        if (!photoId) {
+            throw new Error("写真の識別情報を取得できませんでした。");
+        }
         await waitUntil(
-            () =>
-                location.pathname.includes("/photo/") && location.href === href,
+            () => location.pathname.includes(`/photo/${photoId}`),
             "写真ページを開けませんでした。"
         );
 
@@ -380,31 +506,37 @@
             throw new Error("写真の撮影時刻を読み取れませんでした。");
         }
 
-        const backLink = [...document.querySelectorAll("a[href]")].find(
-            (link) => {
-                if (!(link instanceof HTMLAnchorElement)) return false;
-                const href = link.href;
-                return (
-                    (link.textContent || "").includes("検索に戻る") ||
-                    (href.includes("/search/") && !href.includes("/photo/"))
-                );
-            }
-        );
-        if (!(backLink instanceof HTMLAnchorElement)) {
-            throw new Error("写真一覧に戻るリンクが見つかりません。");
+        setStatus("検索結果に戻っています…");
+        history.back();
+        try {
+            await waitUntil(
+                () =>
+                    location.pathname.includes("/search/") &&
+                    !location.pathname.includes("/photo/"),
+                "検索結果に戻れませんでした。"
+            );
+        } catch {
+            setStatus("日付検索をやり直しています…");
+            await searchDate(getLocalDateQuery(targetDateTime));
         }
 
-        backLink.click();
-        await waitUntil(
-            () =>
-                location.pathname.includes("/search/") &&
-                !location.pathname.includes("/photo/"),
-            "写真一覧に戻れませんでした。"
+        const searchInput = document.querySelector(
+            'input[aria-label="写真やアルバムを検索"], input[role="combobox"]'
         );
-        await waitUntil(
-            () => getPhotoCards().some((element) => element.href === href),
-            "検索結果の写真を再表示できませんでした。"
-        );
+        if (
+            !(searchInput instanceof HTMLInputElement) ||
+            searchInput.value !== getLocalDateQuery(targetDateTime)
+        ) {
+            setStatus("日付検索を復元しています…");
+            await searchDate(getLocalDateQuery(targetDateTime));
+        }
+
+        const restoredCard = await findPhotoCard(href);
+        if (!restoredCard) {
+            throw new Error(
+                "写真一覧には戻りましたが、対象の写真を検索結果内で再表示できませんでした。"
+            );
+        }
         return captureTime;
     }
 
@@ -418,6 +550,8 @@
         debugState.targetDate = getLocalDateQuery(targetTime);
         debugState.lastError = null;
         debugState.searchResultCount = 0;
+        debugState.collectionPasses = 0;
+        debugState.maxScrollTop = 0;
         debugState.inspectedPhotoIndexes = [];
         debugState.events = [];
         try {
@@ -516,9 +650,10 @@
             }
 
             const closestHref = photoHrefs[closestIndex];
-            const closestCard = getPhotoCards().find(
-                (card) => card.href === closestHref
-            );
+            if (closestHref === undefined) {
+                throw new Error("見つかった写真の識別情報がありません。");
+            }
+            const closestCard = await findPhotoCard(closestHref);
             if (!closestCard) {
                 throw new Error("見つかった写真を一覧に表示できませんでした。");
             }
