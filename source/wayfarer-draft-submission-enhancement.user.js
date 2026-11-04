@@ -704,7 +704,7 @@
     let observedElement = null;
 
     /**
-     * 新旧提出画面から表示中の座標文字列を取得する
+     * 提出画面から表示中の座標文字列を取得する
      * @param {Element} root
      */
     function findDisplayedCoordinate(root) {
@@ -720,7 +720,7 @@
         let node = walker.nextNode();
         while (node) {
             const text = (node.textContent || "").trim();
-            if (/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(text)) {
+            if (/^\(?\s*-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?\s*\)?$/.test(text)) {
                 return text;
             }
             node = walker.nextNode();
