@@ -2,7 +2,7 @@
 // @name         Wayfarer Draft Submission Enhancement
 // @namespace    https://github.com/
 // @version      1.26
-// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンマーカーの描画。
+// @description  下書き座標を数値で指定。他アプリからの自動操作。座標変更時のトースト通知。座標移動のUndo/Redo。ピンマーカーの描画。表示座標のクリックコピー。
 // @match        https://wayfarer.scopely.com/*
 // @grant        none
 // ==/UserScript==
@@ -702,15 +702,49 @@
     let coordObserver = null;
     /** @type {Element | null} */
     let observedElement = null;
+    /** @type {HTMLElement | null} */
+    let coordinateCopyElement = null;
+    let coordinateCopyOriginalCursor = "";
+    /** @type {string | null} */
+    let coordinateCopyOriginalTitle = null;
+    let coordinateCopyOriginalClass = false;
+    /** @type {HTMLStyleElement | null} */
+    let coordinateCopyStyle = null;
+
+    function ensureCoordinateCopyStyle() {
+        if (coordinateCopyStyle) return;
+
+        coordinateCopyStyle = document.createElement("style");
+        coordinateCopyStyle.id = "custom-coordinate-copy-style";
+        coordinateCopyStyle.textContent = `
+            .custom-coordinate-copy-target {
+                text-decoration: underline dashed;
+                text-underline-offset: 3px;
+            }
+            .custom-coordinate-copy-target::after {
+                content: " 📋";
+                font-size: 0.85em;
+                white-space: nowrap;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(
+            coordinateCopyStyle
+        );
+    }
+
+    const displayedCoordinatePattern =
+        /^\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?$/;
 
     /**
-     * 提出画面から表示中の座標文字列を取得する
+     * 提出画面から表示中の座標要素を取得する
      * @param {Element} root
      */
-    function findDisplayedCoordinate(root) {
-        const legacyCoordinate = root.querySelector(".submit-coordinates-text");
+    function findDisplayedCoordinateElement(root) {
+        const legacyCoordinate = /** @type {HTMLElement | null} */ (
+            root.querySelector(".submit-coordinates-text")
+        );
         if (legacyCoordinate) {
-            return (legacyCoordinate.textContent || "").trim();
+            return legacyCoordinate;
         }
 
         const walker = document.createTreeWalker(
@@ -719,14 +753,112 @@
         );
         let node = walker.nextNode();
         while (node) {
-            const text = (node.textContent || "").trim();
-            if (/^\(?\s*-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?\s*\)?$/.test(text)) {
-                return text;
+            if (
+                displayedCoordinatePattern.test((node.textContent || "").trim())
+            ) {
+                if (node instanceof HTMLElement) return node;
+                if (node.parentElement instanceof HTMLElement) {
+                    return node.parentElement;
+                }
             }
             node = walker.nextNode();
         }
 
-        return "";
+        return null;
+    }
+
+    /**
+     * 表示中の座標を括弧・空白なしでクリップボードへコピーする
+     * @param {Event} event
+     */
+    function copyDisplayedCoordinate(event) {
+        const element = event.currentTarget;
+        if (!(element instanceof HTMLElement)) return;
+
+        const match = (element.textContent || "")
+            .trim()
+            .match(displayedCoordinatePattern);
+        if (!match) return;
+
+        const coordinate = `${assertsNonNull(match[1])},${assertsNonNull(
+            match[2]
+        )}`;
+        if (!navigator.clipboard?.writeText) {
+            showToast(
+                "座標コピーに失敗しました: クリップボードを利用できません。"
+            );
+            return;
+        }
+
+        navigator.clipboard
+            .writeText(coordinate)
+            .then(() => showToast(`座標をコピーしました: ${coordinate}`))
+            .catch((err) =>
+                showToast(
+                    "座標コピーに失敗しました: " +
+                        (err instanceof Error ? err.message : String(err))
+                )
+            );
+    }
+
+    function clearCoordinateCopyTarget() {
+        if (!coordinateCopyElement) return;
+
+        coordinateCopyElement.removeEventListener(
+            "click",
+            copyDisplayedCoordinate
+        );
+        coordinateCopyElement.style.cursor = coordinateCopyOriginalCursor;
+        if (!coordinateCopyOriginalClass) {
+            coordinateCopyElement.classList.remove(
+                "custom-coordinate-copy-target"
+            );
+        }
+        if (coordinateCopyOriginalTitle === null) {
+            coordinateCopyElement.removeAttribute("title");
+        } else {
+            coordinateCopyElement.setAttribute(
+                "title",
+                coordinateCopyOriginalTitle
+            );
+        }
+
+        coordinateCopyElement = null;
+        coordinateCopyOriginalCursor = "";
+        coordinateCopyOriginalTitle = null;
+        coordinateCopyOriginalClass = false;
+    }
+
+    /**
+     * 現在の座標要素をクリックでコピーできるようにする
+     * @param {Element} root
+     */
+    function updateCoordinateCopyTarget(root) {
+        const nextElement = findDisplayedCoordinateElement(root);
+        if (nextElement === coordinateCopyElement) return;
+
+        clearCoordinateCopyTarget();
+        if (!nextElement) return;
+
+        coordinateCopyElement = nextElement;
+        coordinateCopyOriginalCursor = nextElement.style.cursor;
+        coordinateCopyOriginalTitle = nextElement.getAttribute("title");
+        coordinateCopyOriginalClass = nextElement.classList.contains(
+            "custom-coordinate-copy-target"
+        );
+        nextElement.style.cursor = "pointer";
+        nextElement.title = "クリックして座標をコピー";
+        nextElement.classList.add("custom-coordinate-copy-target");
+        ensureCoordinateCopyStyle();
+        nextElement.addEventListener("click", copyDisplayedCoordinate);
+    }
+
+    /**
+     * 提出画面から表示中の座標文字列を取得する
+     * @param {Element} root
+     */
+    function findDisplayedCoordinate(root) {
+        return findDisplayedCoordinateElement(root)?.textContent?.trim() || "";
     }
 
     /**
@@ -775,8 +907,10 @@
         if (coordObserver) {
             coordObserver.disconnect();
         }
+        clearCoordinateCopyTarget();
 
         observedElement = root;
+        updateCoordinateCopyTarget(root);
         lastObservedCoord = findDisplayedCoordinate(root);
 
         if (lastObservedCoord) {
@@ -797,6 +931,7 @@
         }
 
         coordObserver = new MutationObserver(() => {
+            updateCoordinateCopyTarget(root);
             const currentCoord = findDisplayedCoordinate(root);
             if (currentCoord && currentCoord !== lastObservedCoord) {
                 lastObservedCoord = currentCoord;
@@ -1162,6 +1297,9 @@
             coordObserver.disconnect();
             coordObserver = null;
         }
+        clearCoordinateCopyTarget();
+        coordinateCopyStyle?.remove();
+        coordinateCopyStyle = null;
         observedElement = null;
 
         const inputUI = document.getElementById("custom-coord-input-container");
